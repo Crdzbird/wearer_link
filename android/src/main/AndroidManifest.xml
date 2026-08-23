@@ -1,0 +1,18 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+  <application>
+    <!-- Background receive path: the system starts this app's process to
+         deliver Data Layer events even when the app is not running. -->
+    <service
+        android:name="com.crdzbird.wearer_link.WearerLinkListenerService"
+        android:exported="true">
+      <intent-filter>
+        <action android:name="com.google.android.gms.wearable.MESSAGE_RECEIVED" />
+        <action android:name="com.google.android.gms.wearable.DATA_CHANGED" />
+        <data
+            android:scheme="wear"
+            android:host="*"
+            android:pathPrefix="/wl" />
+      </intent-filter>
+    </service>
+  </application>
+</manifest>

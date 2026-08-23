@@ -1,0 +1,30 @@
+name: wearer_link
+description: >-
+  Connect a Flutter phone app with its wearable companion (Wear OS / watchOS):
+  bidirectional messaging, synced data, background delivery while the app is
+  not running, and mutual app launch where the platform allows it.
+version: 0.1.0
+homepage: https://github.com/crdzbird/wearer_link
+
+environment:
+  sdk: ^3.9.0
+  flutter: '>=3.3.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+  pigeon: ^26.0.1
+
+flutter:
+  plugin:
+    platforms:
+      android:
+        package: com.crdzbird.wearer_link
+        pluginClass: WearerLinkPlugin
+      ios:
+        pluginClass: WearerLinkPlugin

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Advertises the wearer_link capability so counterpart nodes can find
+     this app via CapabilityClient. Merged into the consuming app's
+     resources automatically — zero-config for plugin users. -->
+<resources xmlns:tools="http://schemas.android.com/tools">
+  <string-array name="android_wear_capabilities" tools:ignore="UnusedResources">
+    <item>wearer_link</item>
+  </string-array>
+</resources>

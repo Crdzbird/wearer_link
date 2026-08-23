@@ -1,0 +1,45 @@
+package com.crdzbird.wearer_link
+
+/**
+ * On-the-wire namespacing over the Data Layer so wearer_link traffic never
+ * collides with other plugins/apps sharing the same node network.
+ *
+ * CONTRACT: mirrored by the iOS/watchOS sides ("kind"/"path" envelope keys).
+ */
+object WireProtocol {
+  /** Capability advertised by every app embedding this plugin (wear.xml). */
+  const val CAPABILITY = "wearer_link"
+
+  /** Root prefix for every message and data item owned by the plugin. */
+  const val PREFIX = "/wl"
+
+  /** Interactive messages: MessageClient path = "/wl/m<userPath>". */
+  const val MESSAGE_PREFIX = "$PREFIX/m"
+
+  /** Latest-state sync items: DataItem path = "/wl/s<userPath>". */
+  const val SYNC_PREFIX = "$PREFIX/s"
+
+  /** Queued transfers: DataItem path = "/wl/q<userPath>/<uuid>". */
+  const val QUEUE_PREFIX = "$PREFIX/q"
+
+  const val KEY_PAYLOAD = "payload"
+  const val KEY_ID = "id"
+  const val KEY_TIMESTAMP = "ts"
+
+  /** Manifest meta-data key holding the deep-link URI used by launchCompanion. */
+  const val LAUNCH_URI_METADATA = "com.crdzbird.wearer_link.launchUri"
+
+  fun messagePath(userPath: String) = MESSAGE_PREFIX + userPath
+
+  fun userPathOfMessage(wirePath: String) = wirePath.removePrefix(MESSAGE_PREFIX)
+
+  fun syncPath(userPath: String) = SYNC_PREFIX + userPath
+
+  fun userPathOfSync(wirePath: String) = wirePath.removePrefix(SYNC_PREFIX)
+
+  fun queuePath(userPath: String, id: String) = "$QUEUE_PREFIX$userPath/$id"
+
+  /** "/wl/q/foo/bar/<uuid>" -> "/foo/bar". */
+  fun userPathOfQueue(wirePath: String) =
+    wirePath.removePrefix(QUEUE_PREFIX).substringBeforeLast('/')
+}
