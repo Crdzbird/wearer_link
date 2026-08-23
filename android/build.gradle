@@ -2,14 +2,14 @@ group = "com.crdzbird.wearer_link"
 version = "1.0-SNAPSHOT"
 
 buildscript {
-    ext.kotlin_version = "2.1.0"
+    ext.kotlin_version = "2.2.20"
     repositories {
         google()
         mavenCentral()
     }
 
     dependencies {
-        classpath("com.android.tools.build:gradle:8.9.1")
+        classpath("com.android.tools.build:gradle:8.11.1")
         classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version")
     }
 }
@@ -71,14 +71,12 @@ android {
 }
 
 dependencies {
-    // VERIFY: pin to the current releases before shipping; these were the
-    // latest stable versions when authored and could not be resolved in the
-    // authoring environment (no access to maven.google.com).
-    implementation("com.google.android.gms:play-services-wearable:19.0.0")
-    implementation("androidx.wear:wear-remote-interactions:1.1.0")
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
+    // Pinned to the current stable releases (verified compiling 2026-08-23).
+    implementation("com.google.android.gms:play-services-wearable:20.0.1")
+    implementation("androidx.wear:wear-remote-interactions:1.2.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
     // Task.await() extensions for Play Services.
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.9.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.11.0")
     // ListenableFuture.await() for RemoteActivityHelper.
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-guava:1.9.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-guava:1.11.0")
 }

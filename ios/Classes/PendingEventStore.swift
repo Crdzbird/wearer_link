@@ -1,3 +1,4 @@
+import Flutter
 import Foundation
 
 /// Bounded persistent FIFO for events that arrive while no Flutter engine is

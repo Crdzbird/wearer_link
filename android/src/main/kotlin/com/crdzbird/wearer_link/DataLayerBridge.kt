@@ -125,8 +125,6 @@ class DataLayerBridge(private val context: Context) {
     val intent = Intent(Intent.ACTION_VIEW)
       .addCategory(Intent.CATEGORY_BROWSABLE)
       .setData(Uri.parse(uri))
-    // VERIFY: RemoteActivityHelper(Context, Executor) constructor against the
-    // pinned androidx.wear:wear-remote-interactions release.
     val helper = RemoteActivityHelper(context, mainExecutor)
     for (node in nodes) {
       try {

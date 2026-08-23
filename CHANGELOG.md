@@ -17,3 +17,16 @@ Working prototype.
   launch (typed `unsupported` error elsewhere — OS policy).
 * watchOS: `WearerLinkWatch` Swift package for native watch apps
   (activate/send/sync/transfer/wake, startup event buffering).
+
+## 0.1.1
+
+* First native compiles verified on a real toolchain (previously authored
+  offline): Kotlin plugin + unit tests (AGP 8.11.1, Kotlin 2.2.20,
+  Gradle 8.14.3), iOS `flutter build ios`, watchOS package
+  (`xcodebuild -destination generic/platform=watchOS`).
+* Android deps pinned to current stable and compile-verified:
+  play-services-wearable 20.0.1, wear-remote-interactions 1.2.0
+  (`RemoteActivityHelper(Context, Executor)` confirmed), coroutines 1.11.0.
+  Both `// VERIFY:` markers resolved.
+* iOS: added missing `import Flutter` in `PendingEventStore.swift`.
+* Example iOS project migrated to UIScene lifecycle (Flutter 3.47 tooling).
