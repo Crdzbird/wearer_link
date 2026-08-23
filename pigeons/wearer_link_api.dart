@@ -58,6 +58,9 @@ enum WearerEventKindDto {
 
   /// Synced or transferred data.
   data,
+
+  /// A file received via transferFile. `filePath` points at the local copy.
+  file,
 }
 
 /// A message or data event crossing the device boundary.
@@ -89,6 +92,10 @@ class WearerEventDto {
   /// True when the event was received while no Flutter engine was attached
   /// and is being replayed from the persistent queue.
   bool deliveredWhileDead;
+
+  /// For [WearerEventKindDto.file] events: absolute path of the received
+  /// file (stored in the app's cache directory). Null for other kinds.
+  String? filePath;
 }
 
 /// Dart -> native.
@@ -126,6 +133,37 @@ abstract class WearerLinkHostApi {
   /// facade on startup; each drained event is also removed from the store.
   @async
   List<WearerEventDto> drainPendingEvents();
+
+  /// Transfer the file at [filePath] to the counterpart.
+  /// Android: ChannelClient (needs a reachable capable node).
+  /// iOS: WCSession.transferFile (queued, survives unreachability).
+  @async
+  void transferFile(String path, String filePath);
+
+  /// Push fresh complication data to the watch face.
+  /// iOS: transferCurrentComplicationUserInfo (budgeted by watchOS — ~50/day;
+  /// over budget it silently degrades to a regular transfer).
+  /// Android: throws 'unsupported' — use syncData + requestSurfaceUpdate
+  /// inside the Wear OS app instead.
+  @async
+  void updateComplication(Uint8List payload);
+
+  /// Ask the system to re-render this app's tile or complication after its
+  /// backing state changed. Wear OS only (call it inside the watch app);
+  /// [component] is the fully-qualified class name of the app's TileService
+  /// or complication data-source service. Throws 'unsupported' on iOS.
+  @async
+  void requestSurfaceUpdate(String component);
+
+  /// Store the callback handles powering the headless background isolate.
+  /// [dispatcherHandle] is the plugin's entrypoint; [userHandle] the app's
+  /// top-level handler. Persisted natively so events that arrive while the
+  /// app is dead can start a Dart isolate and be handled immediately.
+  void registerBackgroundHandler(int dispatcherHandle, int userHandle);
+
+  /// Stop launching the background isolate for dead-app events (they fall
+  /// back to the persistent queue only).
+  void clearBackgroundHandler();
 }
 
 /// Native -> Dart.
@@ -135,5 +173,25 @@ abstract class WearerLinkFlutterApi {
 
   void onDataChanged(WearerEventDto event);
 
+  void onFileReceived(WearerEventDto event);
+
   void onConnectionStateChanged(CompanionStatusDto status);
+}
+
+/// Dart -> native, background isolate only.
+@HostApi()
+abstract class WearerLinkBackgroundHostApi {
+  /// Handshake from the freshly-started background isolate. Returns the raw
+  /// callback handle of the user's registered handler; after this returns,
+  /// the native side starts delivering queued events.
+  int backgroundReady();
+}
+
+/// Native -> Dart, background isolate only. The completion of
+/// [onBackgroundEvent] is the delivery ack: the native side removes the
+/// event from the persistent queue only after the Dart future completes.
+@FlutterApi()
+abstract class WearerLinkBackgroundFlutterApi {
+  @async
+  void onBackgroundEvent(WearerEventDto event);
 }

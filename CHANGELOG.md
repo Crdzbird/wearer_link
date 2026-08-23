@@ -18,6 +18,26 @@ Working prototype.
 * watchOS: `WearerLinkWatch` Swift package for native watch apps
   (activate/send/sync/transfer/wake, startup event buffering).
 
+## 0.2.0
+
+M5: background isolate, file transfers, watch-face surfaces.
+
+* `registerBackgroundHandler`: events that arrive while the app is dead are
+  handled immediately in a headless Dart isolate (workmanager-style
+  callback handles; ack removes the event from the pending queue, a failed
+  handler leaves it queued — at-least-once preserved). Device-verified:
+  dead phone app handled a watch ping in the isolate and messaged back.
+* `transferFile` + `fileEvents`: Android ChannelClient / iOS
+  `WCSession.transferFile`; received files land in the app cache dir; new
+  `WearerEventKind.file` with `filePath`. Manifest gained the
+  `CHANNEL_EVENT` action. Device-verified phone→watch.
+* `updateComplication` (iOS `transferCurrentComplicationUserInfo`; typed
+  `unsupported` on Android) and `requestSurfaceUpdate` (Wear OS tile /
+  complication refresh via compileOnly androidx requesters; typed
+  `unsupported` on iOS).
+* watchOS lib: `transferFile(path:fileURL:)`, `Event.fileURL` for received
+  files.
+
 ## 0.1.1
 
 * Android verified on real hardware (Pixel 7 Pro + Pixel Watch 2):

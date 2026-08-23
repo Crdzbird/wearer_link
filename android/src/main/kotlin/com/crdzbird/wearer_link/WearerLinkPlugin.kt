@@ -27,21 +27,35 @@ class WearerLinkPlugin : FlutterPlugin, WearerLinkHostApi {
   private val capabilityListener =
     CapabilityClient.OnCapabilityChangedListener { pushConnectionState() }
 
+  /** True when this instance owns the process-wide [liveDispatcher] slot. */
+  private var claimedLiveDispatch = false
+
   override fun onAttachedToEngine(binding: FlutterPlugin.FlutterPluginBinding) {
     context = binding.applicationContext
     bridge = DataLayerBridge(context)
     store = PendingEventStore(context)
-    flutterApi = WearerLinkFlutterApi(binding.binaryMessenger)
     scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     WearerLinkHostApi.setUp(binding.binaryMessenger, this)
+    if (BackgroundDispatcher.creatingBackgroundEngine) {
+      // Attached to the plugin's own headless engine (FlutterEngine
+      // auto-registers plugins). It must NOT claim live event dispatch —
+      // events reach it through WearerLinkBackgroundFlutterApi — but the
+      // HostApi above stays so the background handler can send/sync back.
+      return
+    }
+    flutterApi = WearerLinkFlutterApi(binding.binaryMessenger)
     if (bridge?.isSupported() == true) {
       bridge?.addCapabilityListener(capabilityListener)
     }
     liveDispatcher = ::dispatchToDart
+    claimedLiveDispatch = true
   }
 
   override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
-    liveDispatcher = null
+    if (claimedLiveDispatch) {
+      liveDispatcher = null
+      claimedLiveDispatch = false
+    }
     WearerLinkHostApi.setUp(binding.binaryMessenger, null)
     bridge?.removeCapabilityListener(capabilityListener)
     scope?.cancel()
@@ -86,6 +100,47 @@ class WearerLinkPlugin : FlutterPlugin, WearerLinkHostApi {
 
   override fun launchCompanion(callback: (Result<Unit>) -> Unit) {
     launchWith(callback) { it.launchCompanion(mainExecutor) }
+  }
+
+  override fun transferFile(
+    path: String,
+    filePath: String,
+    callback: (Result<Unit>) -> Unit,
+  ) {
+    launchWith(callback) { it.transferFile(path, filePath) }
+  }
+
+  override fun updateComplication(
+    payload: ByteArray,
+    callback: (Result<Unit>) -> Unit,
+  ) {
+    // watchOS-only primitive; the honest Android answer is a typed error.
+    callback(
+      Result.failure(
+        FlutterError(
+          "unsupported",
+          "Android has no phone->watch complication push. Sync the state " +
+            "with syncData and call requestSurfaceUpdate inside the " +
+            "Wear OS app instead.",
+          null,
+        ),
+      ),
+    )
+  }
+
+  override fun requestSurfaceUpdate(
+    component: String,
+    callback: (Result<Unit>) -> Unit,
+  ) {
+    launchWith(callback) { it.requestSurfaceUpdate(component) }
+  }
+
+  override fun registerBackgroundHandler(dispatcherHandle: Long, userHandle: Long) {
+    BackgroundDispatcher.register(context, dispatcherHandle, userHandle)
+  }
+
+  override fun clearBackgroundHandler() {
+    BackgroundDispatcher.clear(context)
   }
 
   override fun drainPendingEvents(callback: (Result<List<WearerEventDto>>) -> Unit) {
@@ -148,6 +203,7 @@ class WearerLinkPlugin : FlutterPlugin, WearerLinkHostApi {
     when (dto.kind) {
       WearerEventKindDto.MESSAGE -> api.onMessage(dto, onResult)
       WearerEventKindDto.DATA -> api.onDataChanged(dto, onResult)
+      WearerEventKindDto.FILE -> api.onFileReceived(dto, onResult)
     }
   }
 

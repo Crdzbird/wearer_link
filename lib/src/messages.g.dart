@@ -127,6 +127,8 @@ enum WearerEventKindDto {
   message,
   /// Synced or transferred data.
   data,
+  /// A file received via transferFile. `filePath` points at the local copy.
+  file,
 }
 
 /// Snapshot of the companion relationship.
@@ -186,6 +188,7 @@ class WearerEventDto {
     required this.sourceNodeId,
     required this.timestampMillis,
     required this.deliveredWhileDead,
+    this.filePath,
   });
 
   /// Unique id for at-least-once dedup across background replays.
@@ -206,6 +209,10 @@ class WearerEventDto {
   /// and is being replayed from the persistent queue.
   bool deliveredWhileDead;
 
+  /// For [WearerEventKindDto.file] events: absolute path of the received
+  /// file (stored in the app's cache directory). Null for other kinds.
+  String? filePath;
+
   List<Object?> _toList() {
     return <Object?>[
       id,
@@ -215,6 +222,7 @@ class WearerEventDto {
       sourceNodeId,
       timestampMillis,
       deliveredWhileDead,
+      filePath,
     ];
   }
 
@@ -231,6 +239,7 @@ class WearerEventDto {
       sourceNodeId: result[4]! as String,
       timestampMillis: result[5]! as int,
       deliveredWhileDead: result[6]! as bool,
+      filePath: result[7] as String?,
     );
   }
 
@@ -243,7 +252,7 @@ class WearerEventDto {
     if (identical(this, other)) {
       return true;
     }
-    return _deepEquals(id, other.id) && _deepEquals(kind, other.kind) && _deepEquals(path, other.path) && _deepEquals(payload, other.payload) && _deepEquals(sourceNodeId, other.sourceNodeId) && _deepEquals(timestampMillis, other.timestampMillis) && _deepEquals(deliveredWhileDead, other.deliveredWhileDead);
+    return _deepEquals(id, other.id) && _deepEquals(kind, other.kind) && _deepEquals(path, other.path) && _deepEquals(payload, other.payload) && _deepEquals(sourceNodeId, other.sourceNodeId) && _deepEquals(timestampMillis, other.timestampMillis) && _deepEquals(deliveredWhileDead, other.deliveredWhileDead) && _deepEquals(filePath, other.filePath);
   }
 
   @override
@@ -450,6 +459,114 @@ class WearerLinkHostApi {
     ;
     return (pigeonVar_replyValue! as List<Object?>).cast<WearerEventDto>();
   }
+
+  /// Transfer the file at [filePath] to the counterpart.
+  /// Android: ChannelClient (needs a reachable capable node).
+  /// iOS: WCSession.transferFile (queued, survives unreachability).
+  Future<void> transferFile(String path, String filePath) async {
+    final pigeonVar_channelName = 'dev.flutter.pigeon.wearer_link.WearerLinkHostApi.transferFile$pigeonVar_messageChannelSuffix';
+    final pigeonVar_channel = BasicMessageChannel<Object?>(
+      pigeonVar_channelName,
+      pigeonChannelCodec,
+      binaryMessenger: pigeonVar_binaryMessenger,
+    );
+    final Future<Object?> pigeonVar_sendFuture = pigeonVar_channel.send(<Object?>[path, filePath]);
+    final pigeonVar_replyList = await pigeonVar_sendFuture as List<Object?>?;
+
+    _extractReplyValueOrThrow(
+        pigeonVar_replyList,
+        pigeonVar_channelName,
+        isNullValid: true,
+    )
+    ;
+  }
+
+  /// Push fresh complication data to the watch face.
+  /// iOS: transferCurrentComplicationUserInfo (budgeted by watchOS — ~50/day;
+  /// over budget it silently degrades to a regular transfer).
+  /// Android: throws 'unsupported' — use syncData + requestSurfaceUpdate
+  /// inside the Wear OS app instead.
+  Future<void> updateComplication(Uint8List payload) async {
+    final pigeonVar_channelName = 'dev.flutter.pigeon.wearer_link.WearerLinkHostApi.updateComplication$pigeonVar_messageChannelSuffix';
+    final pigeonVar_channel = BasicMessageChannel<Object?>(
+      pigeonVar_channelName,
+      pigeonChannelCodec,
+      binaryMessenger: pigeonVar_binaryMessenger,
+    );
+    final Future<Object?> pigeonVar_sendFuture = pigeonVar_channel.send(<Object?>[payload]);
+    final pigeonVar_replyList = await pigeonVar_sendFuture as List<Object?>?;
+
+    _extractReplyValueOrThrow(
+        pigeonVar_replyList,
+        pigeonVar_channelName,
+        isNullValid: true,
+    )
+    ;
+  }
+
+  /// Ask the system to re-render this app's tile or complication after its
+  /// backing state changed. Wear OS only (call it inside the watch app);
+  /// [component] is the fully-qualified class name of the app's TileService
+  /// or complication data-source service. Throws 'unsupported' on iOS.
+  Future<void> requestSurfaceUpdate(String component) async {
+    final pigeonVar_channelName = 'dev.flutter.pigeon.wearer_link.WearerLinkHostApi.requestSurfaceUpdate$pigeonVar_messageChannelSuffix';
+    final pigeonVar_channel = BasicMessageChannel<Object?>(
+      pigeonVar_channelName,
+      pigeonChannelCodec,
+      binaryMessenger: pigeonVar_binaryMessenger,
+    );
+    final Future<Object?> pigeonVar_sendFuture = pigeonVar_channel.send(<Object?>[component]);
+    final pigeonVar_replyList = await pigeonVar_sendFuture as List<Object?>?;
+
+    _extractReplyValueOrThrow(
+        pigeonVar_replyList,
+        pigeonVar_channelName,
+        isNullValid: true,
+    )
+    ;
+  }
+
+  /// Store the callback handles powering the headless background isolate.
+  /// [dispatcherHandle] is the plugin's entrypoint; [userHandle] the app's
+  /// top-level handler. Persisted natively so events that arrive while the
+  /// app is dead can start a Dart isolate and be handled immediately.
+  Future<void> registerBackgroundHandler(int dispatcherHandle, int userHandle) async {
+    final pigeonVar_channelName = 'dev.flutter.pigeon.wearer_link.WearerLinkHostApi.registerBackgroundHandler$pigeonVar_messageChannelSuffix';
+    final pigeonVar_channel = BasicMessageChannel<Object?>(
+      pigeonVar_channelName,
+      pigeonChannelCodec,
+      binaryMessenger: pigeonVar_binaryMessenger,
+    );
+    final Future<Object?> pigeonVar_sendFuture = pigeonVar_channel.send(<Object?>[dispatcherHandle, userHandle]);
+    final pigeonVar_replyList = await pigeonVar_sendFuture as List<Object?>?;
+
+    _extractReplyValueOrThrow(
+        pigeonVar_replyList,
+        pigeonVar_channelName,
+        isNullValid: true,
+    )
+    ;
+  }
+
+  /// Stop launching the background isolate for dead-app events (they fall
+  /// back to the persistent queue only).
+  Future<void> clearBackgroundHandler() async {
+    final pigeonVar_channelName = 'dev.flutter.pigeon.wearer_link.WearerLinkHostApi.clearBackgroundHandler$pigeonVar_messageChannelSuffix';
+    final pigeonVar_channel = BasicMessageChannel<Object?>(
+      pigeonVar_channelName,
+      pigeonChannelCodec,
+      binaryMessenger: pigeonVar_binaryMessenger,
+    );
+    final Future<Object?> pigeonVar_sendFuture = pigeonVar_channel.send(null);
+    final pigeonVar_replyList = await pigeonVar_sendFuture as List<Object?>?;
+
+    _extractReplyValueOrThrow(
+        pigeonVar_replyList,
+        pigeonVar_channelName,
+        isNullValid: true,
+    )
+    ;
+  }
 }
 
 /// Native -> Dart.
@@ -459,6 +576,8 @@ abstract class WearerLinkFlutterApi {
   void onMessage(WearerEventDto event);
 
   void onDataChanged(WearerEventDto event);
+
+  void onFileReceived(WearerEventDto event);
 
   void onConnectionStateChanged(CompanionStatusDto status);
 
@@ -508,6 +627,27 @@ abstract class WearerLinkFlutterApi {
     }
     {
       final pigeonVar_channel = BasicMessageChannel<Object?>(
+          'dev.flutter.pigeon.wearer_link.WearerLinkFlutterApi.onFileReceived$messageChannelSuffix', pigeonChannelCodec,
+          binaryMessenger: binaryMessenger);
+      if (api == null) {
+        pigeonVar_channel.setMessageHandler(null);
+      } else {
+        pigeonVar_channel.setMessageHandler((Object? message) async {
+          final List<Object?> args = message! as List<Object?>;
+          final WearerEventDto arg_event = args[0]! as WearerEventDto;
+          try {
+            api.onFileReceived(arg_event);
+            return wrapResponse(empty: true);
+          } on PlatformException catch (e) {
+            return wrapResponse(error: e);
+          }          catch (e) {
+            return wrapResponse(error: PlatformException(code: 'error', message: e.toString()));
+          }
+        });
+      }
+    }
+    {
+      final pigeonVar_channel = BasicMessageChannel<Object?>(
           'dev.flutter.pigeon.wearer_link.WearerLinkFlutterApi.onConnectionStateChanged$messageChannelSuffix', pigeonChannelCodec,
           binaryMessenger: binaryMessenger);
       if (api == null) {
@@ -518,6 +658,77 @@ abstract class WearerLinkFlutterApi {
           final CompanionStatusDto arg_status = args[0]! as CompanionStatusDto;
           try {
             api.onConnectionStateChanged(arg_status);
+            return wrapResponse(empty: true);
+          } on PlatformException catch (e) {
+            return wrapResponse(error: e);
+          }          catch (e) {
+            return wrapResponse(error: PlatformException(code: 'error', message: e.toString()));
+          }
+        });
+      }
+    }
+  }
+}
+
+/// Dart -> native, background isolate only.
+class WearerLinkBackgroundHostApi {
+  /// Constructor for [WearerLinkBackgroundHostApi].  The [binaryMessenger] named argument is
+  /// available for dependency injection.  If it is left null, the default
+  /// BinaryMessenger will be used which routes to the host platform.
+  WearerLinkBackgroundHostApi({BinaryMessenger? binaryMessenger, String messageChannelSuffix = ''})
+      : pigeonVar_binaryMessenger = binaryMessenger,
+        pigeonVar_messageChannelSuffix = messageChannelSuffix.isNotEmpty ? '.$messageChannelSuffix' : '';
+  final BinaryMessenger? pigeonVar_binaryMessenger;
+
+  static const MessageCodec<Object?> pigeonChannelCodec = _PigeonCodec();
+
+  final String pigeonVar_messageChannelSuffix;
+
+  /// Handshake from the freshly-started background isolate. Returns the raw
+  /// callback handle of the user's registered handler; after this returns,
+  /// the native side starts delivering queued events.
+  Future<int> backgroundReady() async {
+    final pigeonVar_channelName = 'dev.flutter.pigeon.wearer_link.WearerLinkBackgroundHostApi.backgroundReady$pigeonVar_messageChannelSuffix';
+    final pigeonVar_channel = BasicMessageChannel<Object?>(
+      pigeonVar_channelName,
+      pigeonChannelCodec,
+      binaryMessenger: pigeonVar_binaryMessenger,
+    );
+    final Future<Object?> pigeonVar_sendFuture = pigeonVar_channel.send(null);
+    final pigeonVar_replyList = await pigeonVar_sendFuture as List<Object?>?;
+
+    final Object? pigeonVar_replyValue = _extractReplyValueOrThrow(
+        pigeonVar_replyList,
+        pigeonVar_channelName,
+        isNullValid: false,
+    )
+    ;
+    return pigeonVar_replyValue! as int;
+  }
+}
+
+/// Native -> Dart, background isolate only. The completion of
+/// [onBackgroundEvent] is the delivery ack: the native side removes the
+/// event from the persistent queue only after the Dart future completes.
+abstract class WearerLinkBackgroundFlutterApi {
+  static const MessageCodec<Object?> pigeonChannelCodec = _PigeonCodec();
+
+  Future<void> onBackgroundEvent(WearerEventDto event);
+
+  static void setUp(WearerLinkBackgroundFlutterApi? api, {BinaryMessenger? binaryMessenger, String messageChannelSuffix = '',}) {
+    messageChannelSuffix = messageChannelSuffix.isNotEmpty ? '.$messageChannelSuffix' : '';
+    {
+      final pigeonVar_channel = BasicMessageChannel<Object?>(
+          'dev.flutter.pigeon.wearer_link.WearerLinkBackgroundFlutterApi.onBackgroundEvent$messageChannelSuffix', pigeonChannelCodec,
+          binaryMessenger: binaryMessenger);
+      if (api == null) {
+        pigeonVar_channel.setMessageHandler(null);
+      } else {
+        pigeonVar_channel.setMessageHandler((Object? message) async {
+          final List<Object?> args = message! as List<Object?>;
+          final WearerEventDto arg_event = args[0]! as WearerEventDto;
+          try {
+            await api.onBackgroundEvent(arg_event);
             return wrapResponse(empty: true);
           } on PlatformException catch (e) {
             return wrapResponse(error: e);

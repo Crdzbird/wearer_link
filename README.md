@@ -31,6 +31,23 @@ await wearer.sendMessage('/ping', bytes);   // interactive, needs reachable coun
 await wearer.syncData('/state', bytes);     // latest-per-path, survives disconnects
 await wearer.transferData('/log', bytes);   // queued FIFO, every item delivered
 
+// Files (received into the app cache dir; move if you need durability)
+await wearer.transferFile('/photos/1', localFile.path);
+wearer.fileEvents.listen((e) => print('got file: ${e.filePath}'));
+
+// Handle events while the app is NOT running (headless Dart isolate).
+// The handler must be a top-level function; it can use WearerLink APIs.
+@pragma('vm:entry-point')
+Future<void> onBackgroundEvent(WearerEvent event) async {
+  await WearerLink.instance.sendJson('/ack', {'got': event.path});
+}
+// during app startup:
+await wearer.registerBackgroundHandler(onBackgroundEvent);
+
+// Watch-face surfaces
+await wearer.updateComplication(bytes);          // iOS: complication push (budgeted)
+await wearer.requestSurfaceUpdate('com.my.Tile'); // Wear OS: tile/complication refresh
+
 // Launch the companion app on the other device
 await wearer.launchCompanion();
 ```
@@ -116,8 +133,42 @@ WearerLinkWatch.shared.wakePhoneApp()
 Events that arrive while the app is killed are received natively (Android:
 manifest-declared `WearableListenerService`; iOS: WatchConnectivity
 background launch), persisted to a bounded queue (200 events), and replayed
-into `messages` / `dataEvents` on the next launch, flagged with
-`deliveredWhileDead: true`.
+into `messages` / `dataEvents` / `fileEvents` on the next launch, flagged
+with `deliveredWhileDead: true`.
+
+With `registerBackgroundHandler` the same events are additionally handled
+**immediately** in a headless Dart isolate: the native side starts a
+background Flutter engine, runs your top-level handler, and removes the
+event from the queue once the handler completes. If the handler throws (or
+the process dies first) the event stays queued for the next launch —
+delivery is at-least-once either way, dedupable via `event.id`. The handler
+runs in its own isolate (no app state); it can call `WearerLink` APIs to
+respond. Keep it short — the OS may reclaim the process quickly.
+
+## File transfers
+
+`transferFile(path, filePath)` streams a file to the counterpart (Android:
+`ChannelClient`, needs a reachable node; iOS: `WCSession.transferFile`,
+queued). Received files are written to the app's cache directory and
+surfaced on `fileEvents` (`event.filePath`); move them somewhere durable if
+needed. On the native watch, use
+`WearerLinkWatch.shared.transferFile(path:fileURL:)` and `Event.fileURL`.
+
+## Watch-face surfaces
+
+- **iOS → watch complication**: `updateComplication(bytes)` uses
+  `transferCurrentComplicationUserInfo` (watchOS budgets ~50/day; over
+  budget it degrades to a regular queued transfer). The watch app receives
+  it as an event on the reserved path `/complication`.
+- **Wear OS tile/complication**: sync the state with `syncData`, then call
+  `requestSurfaceUpdate('<fully.qualified.ServiceClass>')` **inside the
+  watch app** to make the system re-render its tile (`TileService`) or
+  complication data source. Requires the matching androidx dependency in
+  the watch app (`androidx.wear.tiles:tiles` or
+  `androidx.wear.watchface:watchface-complications-data-source`); the
+  plugin only compiles against them.
+- Each call throws `WearerErrorCode.unsupported` on the platform that
+  forbids it — OS policy, not a plugin gap.
 
 ## Development
 

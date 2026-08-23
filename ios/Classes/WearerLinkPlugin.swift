@@ -35,7 +35,8 @@ public class WearerLinkPlugin: NSObject, FlutterPlugin {
           path: event.path,
           payload: event.payload.data,
           sourceNodeId: event.sourceNodeId,
-          timestampMillis: event.timestampMillis))
+          timestampMillis: event.timestampMillis,
+          filePath: event.filePath))
         return
       }
       let persistOnFailure: (Result<Void, PigeonError>) -> Void = { result in
@@ -47,7 +48,8 @@ public class WearerLinkPlugin: NSObject, FlutterPlugin {
             path: event.path,
             payload: event.payload.data,
             sourceNodeId: event.sourceNodeId,
-            timestampMillis: event.timestampMillis))
+            timestampMillis: event.timestampMillis,
+            filePath: event.filePath))
         }
       }
       switch event.kind {
@@ -55,6 +57,8 @@ public class WearerLinkPlugin: NSObject, FlutterPlugin {
         api.onMessage(event: event, completion: persistOnFailure)
       case .data:
         api.onDataChanged(event: event, completion: persistOnFailure)
+      case .file:
+        api.onFileReceived(event: event, completion: persistOnFailure)
       }
     }
     bridge.statusListener = { [weak self] status in
@@ -106,6 +110,49 @@ extension WearerLinkPlugin: WearerLinkHostApi {
   ) {
     bridge.transferData(path: path, payload: payload.data)
     completion(.success(()))
+  }
+
+  func transferFile(
+    path: String,
+    filePath: String,
+    completion: @escaping (Result<Void, Error>) -> Void
+  ) {
+    do {
+      try bridge.transferFile(path: path, filePath: filePath)
+      completion(.success(()))
+    } catch {
+      completion(.failure(error))
+    }
+  }
+
+  func updateComplication(
+    payload: FlutterStandardTypedData,
+    completion: @escaping (Result<Void, Error>) -> Void
+  ) {
+    bridge.updateComplication(payload: payload.data)
+    completion(.success(()))
+  }
+
+  func requestSurfaceUpdate(
+    component: String,
+    completion: @escaping (Result<Void, Error>) -> Void
+  ) {
+    // watchOS complications reload from the native watch app (ClockKit /
+    // WidgetKit); the phone cannot request it. OS policy, typed error.
+    completion(.failure(PigeonError(
+      code: "unsupported",
+      message: "requestSurfaceUpdate is Wear OS-only; on watchOS reload "
+        + "complications from the watch app after it receives your data.",
+      details: nil)))
+  }
+
+  func registerBackgroundHandler(dispatcherHandle: Int64, userHandle: Int64) throws {
+    BackgroundDispatcher.shared.register(
+      dispatcherHandle: dispatcherHandle, userHandle: userHandle)
+  }
+
+  func clearBackgroundHandler() throws {
+    BackgroundDispatcher.shared.clear()
   }
 
   /// iOS can only launch the watch app for a HealthKit workout session —

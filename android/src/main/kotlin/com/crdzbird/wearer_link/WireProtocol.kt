@@ -22,6 +22,9 @@ object WireProtocol {
   /** Queued transfers: DataItem path = "/wl/q<userPath>/<uuid>". */
   const val QUEUE_PREFIX = "$PREFIX/q"
 
+  /** File transfers: ChannelClient path = "/wl/f<userPath>/<uuid>". */
+  const val FILE_PREFIX = "$PREFIX/f"
+
   const val KEY_PAYLOAD = "payload"
   const val KEY_ID = "id"
   const val KEY_TIMESTAMP = "ts"
@@ -42,4 +45,13 @@ object WireProtocol {
   /** "/wl/q/foo/bar/<uuid>" -> "/foo/bar". */
   fun userPathOfQueue(wirePath: String) =
     wirePath.removePrefix(QUEUE_PREFIX).substringBeforeLast('/')
+
+  fun filePath(userPath: String, id: String) = "$FILE_PREFIX$userPath/$id"
+
+  /** "/wl/f/foo/bar/<uuid>" -> "/foo/bar". */
+  fun userPathOfFile(wirePath: String) =
+    wirePath.removePrefix(FILE_PREFIX).substringBeforeLast('/')
+
+  /** "/wl/f/foo/bar/<uuid>" -> "<uuid>". */
+  fun idOfFile(wirePath: String) = wirePath.substringAfterLast('/')
 }

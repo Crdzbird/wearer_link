@@ -23,6 +23,15 @@ final class PendingEventStore {
     }
   }
 
+  /// Drop one event by id — called after a background isolate acked it.
+  func remove(id: String) {
+    queue.sync {
+      let events = readAll()
+      let kept = events.filter { $0.id != id }
+      if kept.count != events.count { write(kept) }
+    }
+  }
+
   func drain() -> [StoredEvent] {
     queue.sync {
       let events = readAll()
@@ -52,6 +61,7 @@ struct StoredEvent: Codable {
   let payload: Data
   let sourceNodeId: String
   let timestampMillis: Int64
+  var filePath: String? = nil
 
   func toDto(deliveredWhileDead: Bool) -> WearerEventDto {
     WearerEventDto(
@@ -61,7 +71,8 @@ struct StoredEvent: Codable {
       payload: FlutterStandardTypedData(bytes: payload),
       sourceNodeId: sourceNodeId,
       timestampMillis: timestampMillis,
-      deliveredWhileDead: deliveredWhileDead
+      deliveredWhileDead: deliveredWhileDead,
+      filePath: filePath
     )
   }
 }

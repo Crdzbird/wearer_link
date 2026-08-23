@@ -1,14 +1,17 @@
 package com.crdzbird.wearer_link
 
+import android.net.Uri
 import android.os.Handler
 import android.os.Looper
 import com.google.android.gms.tasks.Tasks
+import com.google.android.gms.wearable.ChannelClient
 import com.google.android.gms.wearable.DataEvent
 import com.google.android.gms.wearable.DataEventBuffer
 import com.google.android.gms.wearable.DataMapItem
 import com.google.android.gms.wearable.MessageEvent
 import com.google.android.gms.wearable.Wearable
 import com.google.android.gms.wearable.WearableListenerService
+import java.io.File
 import java.util.UUID
 import java.util.concurrent.TimeUnit
 
@@ -77,6 +80,49 @@ class WearerLinkListenerService : WearableListenerService() {
     }
   }
 
+  // -- File transfers (ChannelClient) ---------------------------------------
+
+  override fun onChannelOpened(channel: ChannelClient.Channel) {
+    val wirePath = channel.path
+    if (!wirePath.startsWith(WireProtocol.FILE_PREFIX)) return
+    // Destination is derived from the wire path alone so onInputClosed can
+    // find it even if the service was recycled in between.
+    Wearable.getChannelClient(this)
+      .receiveFile(channel, Uri.fromFile(fileFor(wirePath)), false)
+  }
+
+  override fun onInputClosed(
+    channel: ChannelClient.Channel,
+    closeReason: Int,
+    appSpecificErrorCode: Int,
+  ) {
+    val wirePath = channel.path
+    if (!wirePath.startsWith(WireProtocol.FILE_PREFIX)) return
+    val file = fileFor(wirePath)
+    if (closeReason != ChannelClient.ChannelCallback.CLOSE_REASON_NORMAL || !file.exists()) {
+      file.delete() // partial transfer — the sender sees the failure
+      return
+    }
+    dispatch(
+      WearerEventDto(
+        id = WireProtocol.idOfFile(wirePath),
+        kind = WearerEventKindDto.FILE,
+        path = WireProtocol.userPathOfFile(wirePath),
+        payload = ByteArray(0),
+        sourceNodeId = channel.nodeId,
+        timestampMillis = System.currentTimeMillis(),
+        deliveredWhileDead = WearerLinkPlugin.liveDispatcher == null,
+        filePath = file.absolutePath,
+      ),
+    )
+  }
+
+  private fun fileFor(wirePath: String): File {
+    val dir = File(cacheDir, "wearer_link")
+    dir.mkdirs()
+    return File(dir, WireProtocol.idOfFile(wirePath))
+  }
+
   private fun dispatch(dto: WearerEventDto) {
     val live = WearerLinkPlugin.liveDispatcher
     if (live != null) {
@@ -86,7 +132,12 @@ class WearerLinkListenerService : WearableListenerService() {
         if (stillLive != null) stillLive(dto) else PendingEventStore(this).append(dto)
       }
     } else {
+      // Persist first (crash-safe), then hand to the headless isolate if the
+      // app registered one; the isolate's ack removes the queued copy.
       PendingEventStore(this).append(dto)
+      if (BackgroundDispatcher.isRegistered(this)) {
+        BackgroundDispatcher.deliver(this, dto)
+      }
     }
   }
 

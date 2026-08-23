@@ -1,5 +1,6 @@
 package com.crdzbird.wearer_link
 
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -11,6 +12,7 @@ import com.google.android.gms.common.api.ApiException
 import com.google.android.gms.common.api.CommonStatusCodes
 import com.google.android.gms.wearable.CapabilityClient
 import com.google.android.gms.wearable.Node
+import java.io.File
 import com.google.android.gms.wearable.PutDataMapRequest
 import com.google.android.gms.wearable.Wearable
 import java.util.UUID
@@ -25,6 +27,7 @@ import kotlinx.coroutines.tasks.await
  */
 class DataLayerBridge(private val context: Context) {
 
+  private val channelClient by lazy { Wearable.getChannelClient(context) }
   private val messageClient by lazy { Wearable.getMessageClient(context) }
   private val dataClient by lazy { Wearable.getDataClient(context) }
   private val nodeClient by lazy { Wearable.getNodeClient(context) }
@@ -110,6 +113,79 @@ class DataLayerBridge(private val context: Context) {
       dataClient.putDataItem(put).await()
     } catch (e: Exception) {
       throw FlutterError("sendFailed", "putDataItem($wirePath) failed: $e", null)
+    }
+  }
+
+  /**
+   * Stream the file to every capable counterpart node over a dedicated
+   * ChannelClient channel; the receiver's WearerLinkListenerService writes
+   * it into its cache dir and emits a file event.
+   */
+  suspend fun transferFile(userPath: String, filePath: String) {
+    val file = File(filePath)
+    if (!file.isFile) {
+      throw FlutterError("sendFailed", "No such file: $filePath", null)
+    }
+    val nodes = capableNodes()
+    if (nodes.isEmpty()) {
+      throw FlutterError(
+        "unreachable",
+        "No reachable node advertises the '${WireProtocol.CAPABILITY}' capability.",
+        null,
+      )
+    }
+    for (node in nodes) {
+      val wirePath = WireProtocol.filePath(userPath, UUID.randomUUID().toString())
+      val channel = try {
+        channelClient.openChannel(node.id, wirePath).await()
+      } catch (e: Exception) {
+        throw FlutterError("sendFailed", "openChannel to ${node.id} failed: $e", null)
+      }
+      try {
+        channelClient.sendFile(channel, Uri.fromFile(file)).await()
+      } catch (e: Exception) {
+        channelClient.close(channel)
+        throw FlutterError("sendFailed", "sendFile to ${node.id} failed: $e", null)
+      }
+    }
+  }
+
+  /**
+   * Re-render a tile or complication surface of the app this plugin runs in
+   * (meaningful inside a Wear OS app). The androidx requesters are
+   * compileOnly dependencies: only apps that ship those surfaces have them,
+   * so their absence is reported as a typed 'unsupported' error.
+   */
+  fun requestSurfaceUpdate(component: String) {
+    val cls = try {
+      Class.forName(component)
+    } catch (e: ClassNotFoundException) {
+      throw FlutterError("unknown", "Class not found in this app: $component", null)
+    }
+    val isTile = try {
+      androidx.wear.tiles.TileService::class.java.isAssignableFrom(cls)
+    } catch (_: NoClassDefFoundError) {
+      false // tiles library absent — fall through to complications
+    }
+    try {
+      if (isTile) {
+        @Suppress("UNCHECKED_CAST")
+        androidx.wear.tiles.TileService.getUpdater(context)
+          .requestUpdate(cls as Class<out androidx.wear.tiles.TileService>)
+      } else {
+        androidx.wear.watchface.complications.datasource
+          .ComplicationDataSourceUpdateRequester
+          .create(context, ComponentName(context, cls.name))
+          .requestUpdateAll()
+      }
+    } catch (_: NoClassDefFoundError) {
+      throw FlutterError(
+        "unsupported",
+        "requestSurfaceUpdate needs androidx.wear.tiles:tiles (tiles) or " +
+          "androidx.wear.watchface:watchface-complications-data-source " +
+          "(complications) on the Wear OS app's classpath.",
+        null,
+      )
     }
   }
 

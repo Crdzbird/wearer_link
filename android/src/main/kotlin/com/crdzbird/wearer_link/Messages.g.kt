@@ -220,7 +220,9 @@ enum class WearerEventKindDto(val raw: Int) {
   /** Interactive message. */
   MESSAGE(0),
   /** Synced or transferred data. */
-  DATA(1);
+  DATA(1),
+  /** A file received via transferFile. `filePath` points at the local copy. */
+  FILE(2);
 
   companion object {
     fun ofRaw(raw: Int): WearerEventKindDto? {
@@ -290,7 +292,12 @@ data class WearerEventDto (
    * True when the event was received while no Flutter engine was attached
    * and is being replayed from the persistent queue.
    */
-  val deliveredWhileDead: Boolean
+  val deliveredWhileDead: Boolean,
+  /**
+   * For [WearerEventKindDto.file] events: absolute path of the received
+   * file (stored in the app's cache directory). Null for other kinds.
+   */
+  val filePath: String? = null
 )
  {
   companion object {
@@ -302,7 +309,8 @@ data class WearerEventDto (
       val sourceNodeId = pigeonVar_list[4] as String
       val timestampMillis = pigeonVar_list[5] as Long
       val deliveredWhileDead = pigeonVar_list[6] as Boolean
-      return WearerEventDto(id, kind, path, payload, sourceNodeId, timestampMillis, deliveredWhileDead)
+      val filePath = pigeonVar_list[7] as String?
+      return WearerEventDto(id, kind, path, payload, sourceNodeId, timestampMillis, deliveredWhileDead, filePath)
     }
   }
   fun toList(): List<Any?> {
@@ -314,6 +322,7 @@ data class WearerEventDto (
       sourceNodeId,
       timestampMillis,
       deliveredWhileDead,
+      filePath,
     )
   }
   override fun equals(other: Any?): Boolean {
@@ -324,7 +333,7 @@ data class WearerEventDto (
       return true
     }
     val other = other as WearerEventDto
-    return MessagesPigeonUtils.deepEquals(this.id, other.id) && MessagesPigeonUtils.deepEquals(this.kind, other.kind) && MessagesPigeonUtils.deepEquals(this.path, other.path) && MessagesPigeonUtils.deepEquals(this.payload, other.payload) && MessagesPigeonUtils.deepEquals(this.sourceNodeId, other.sourceNodeId) && MessagesPigeonUtils.deepEquals(this.timestampMillis, other.timestampMillis) && MessagesPigeonUtils.deepEquals(this.deliveredWhileDead, other.deliveredWhileDead)
+    return MessagesPigeonUtils.deepEquals(this.id, other.id) && MessagesPigeonUtils.deepEquals(this.kind, other.kind) && MessagesPigeonUtils.deepEquals(this.path, other.path) && MessagesPigeonUtils.deepEquals(this.payload, other.payload) && MessagesPigeonUtils.deepEquals(this.sourceNodeId, other.sourceNodeId) && MessagesPigeonUtils.deepEquals(this.timestampMillis, other.timestampMillis) && MessagesPigeonUtils.deepEquals(this.deliveredWhileDead, other.deliveredWhileDead) && MessagesPigeonUtils.deepEquals(this.filePath, other.filePath)
   }
 
   override fun hashCode(): Int {
@@ -336,6 +345,7 @@ data class WearerEventDto (
     result = 31 * result + MessagesPigeonUtils.deepHash(this.sourceNodeId)
     result = 31 * result + MessagesPigeonUtils.deepHash(this.timestampMillis)
     result = 31 * result + MessagesPigeonUtils.deepHash(this.deliveredWhileDead)
+    result = 31 * result + MessagesPigeonUtils.deepHash(this.filePath)
     return result
   }
 }
@@ -425,6 +435,39 @@ interface WearerLinkHostApi {
    * facade on startup; each drained event is also removed from the store.
    */
   fun drainPendingEvents(callback: (Result<List<WearerEventDto>>) -> Unit)
+  /**
+   * Transfer the file at [filePath] to the counterpart.
+   * Android: ChannelClient (needs a reachable capable node).
+   * iOS: WCSession.transferFile (queued, survives unreachability).
+   */
+  fun transferFile(path: String, filePath: String, callback: (Result<Unit>) -> Unit)
+  /**
+   * Push fresh complication data to the watch face.
+   * iOS: transferCurrentComplicationUserInfo (budgeted by watchOS — ~50/day;
+   * over budget it silently degrades to a regular transfer).
+   * Android: throws 'unsupported' — use syncData + requestSurfaceUpdate
+   * inside the Wear OS app instead.
+   */
+  fun updateComplication(payload: ByteArray, callback: (Result<Unit>) -> Unit)
+  /**
+   * Ask the system to re-render this app's tile or complication after its
+   * backing state changed. Wear OS only (call it inside the watch app);
+   * [component] is the fully-qualified class name of the app's TileService
+   * or complication data-source service. Throws 'unsupported' on iOS.
+   */
+  fun requestSurfaceUpdate(component: String, callback: (Result<Unit>) -> Unit)
+  /**
+   * Store the callback handles powering the headless background isolate.
+   * [dispatcherHandle] is the plugin's entrypoint; [userHandle] the app's
+   * top-level handler. Persisted natively so events that arrive while the
+   * app is dead can start a Dart isolate and be handled immediately.
+   */
+  fun registerBackgroundHandler(dispatcherHandle: Long, userHandle: Long)
+  /**
+   * Stop launching the background isolate for dead-app events (they fall
+   * back to the persistent queue only).
+   */
+  fun clearBackgroundHandler()
 
   companion object {
     /** The codec used by WearerLinkHostApi. */
@@ -563,6 +606,99 @@ interface WearerLinkHostApi {
           channel.setMessageHandler(null)
         }
       }
+      run {
+        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.wearer_link.WearerLinkHostApi.transferFile$separatedMessageChannelSuffix", codec)
+        if (api != null) {
+          channel.setMessageHandler { message, reply ->
+            val args = message as List<Any?>
+            val pathArg = args[0] as String
+            val filePathArg = args[1] as String
+            api.transferFile(pathArg, filePathArg) { result: Result<Unit> ->
+              val error = result.exceptionOrNull()
+              if (error != null) {
+                reply.reply(MessagesPigeonUtils.wrapError(error))
+              } else {
+                reply.reply(MessagesPigeonUtils.wrapResult(null))
+              }
+            }
+          }
+        } else {
+          channel.setMessageHandler(null)
+        }
+      }
+      run {
+        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.wearer_link.WearerLinkHostApi.updateComplication$separatedMessageChannelSuffix", codec)
+        if (api != null) {
+          channel.setMessageHandler { message, reply ->
+            val args = message as List<Any?>
+            val payloadArg = args[0] as ByteArray
+            api.updateComplication(payloadArg) { result: Result<Unit> ->
+              val error = result.exceptionOrNull()
+              if (error != null) {
+                reply.reply(MessagesPigeonUtils.wrapError(error))
+              } else {
+                reply.reply(MessagesPigeonUtils.wrapResult(null))
+              }
+            }
+          }
+        } else {
+          channel.setMessageHandler(null)
+        }
+      }
+      run {
+        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.wearer_link.WearerLinkHostApi.requestSurfaceUpdate$separatedMessageChannelSuffix", codec)
+        if (api != null) {
+          channel.setMessageHandler { message, reply ->
+            val args = message as List<Any?>
+            val componentArg = args[0] as String
+            api.requestSurfaceUpdate(componentArg) { result: Result<Unit> ->
+              val error = result.exceptionOrNull()
+              if (error != null) {
+                reply.reply(MessagesPigeonUtils.wrapError(error))
+              } else {
+                reply.reply(MessagesPigeonUtils.wrapResult(null))
+              }
+            }
+          }
+        } else {
+          channel.setMessageHandler(null)
+        }
+      }
+      run {
+        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.wearer_link.WearerLinkHostApi.registerBackgroundHandler$separatedMessageChannelSuffix", codec)
+        if (api != null) {
+          channel.setMessageHandler { message, reply ->
+            val args = message as List<Any?>
+            val dispatcherHandleArg = args[0] as Long
+            val userHandleArg = args[1] as Long
+            val wrapped: List<Any?> = try {
+              api.registerBackgroundHandler(dispatcherHandleArg, userHandleArg)
+              listOf(null)
+            } catch (exception: Throwable) {
+              MessagesPigeonUtils.wrapError(exception)
+            }
+            reply.reply(wrapped)
+          }
+        } else {
+          channel.setMessageHandler(null)
+        }
+      }
+      run {
+        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.wearer_link.WearerLinkHostApi.clearBackgroundHandler$separatedMessageChannelSuffix", codec)
+        if (api != null) {
+          channel.setMessageHandler { _, reply ->
+            val wrapped: List<Any?> = try {
+              api.clearBackgroundHandler()
+              listOf(null)
+            } catch (exception: Throwable) {
+              MessagesPigeonUtils.wrapError(exception)
+            }
+            reply.reply(wrapped)
+          }
+        } else {
+          channel.setMessageHandler(null)
+        }
+      }
     }
   }
 }
@@ -612,12 +748,101 @@ class WearerLinkFlutterApi(private val binaryMessenger: BinaryMessenger, private
       } 
     }
   }
+  fun onFileReceived(eventArg: WearerEventDto, callback: (Result<Unit>) -> Unit)
+{
+    val separatedMessageChannelSuffix = if (messageChannelSuffix.isNotEmpty()) ".$messageChannelSuffix" else ""
+    val channelName = "dev.flutter.pigeon.wearer_link.WearerLinkFlutterApi.onFileReceived$separatedMessageChannelSuffix"
+    val channel = BasicMessageChannel<Any?>(binaryMessenger, channelName, codec)
+    channel.send(listOf(eventArg)) {
+      if (it is List<*>) {
+        if (it.size > 1) {
+          callback(Result.failure(FlutterError(it[0] as String, it[1] as String, it[2] as String?)))
+        } else {
+          callback(Result.success(Unit))
+        }
+      } else {
+        callback(Result.failure(MessagesPigeonUtils.createConnectionError(channelName)))
+      } 
+    }
+  }
   fun onConnectionStateChanged(statusArg: CompanionStatusDto, callback: (Result<Unit>) -> Unit)
 {
     val separatedMessageChannelSuffix = if (messageChannelSuffix.isNotEmpty()) ".$messageChannelSuffix" else ""
     val channelName = "dev.flutter.pigeon.wearer_link.WearerLinkFlutterApi.onConnectionStateChanged$separatedMessageChannelSuffix"
     val channel = BasicMessageChannel<Any?>(binaryMessenger, channelName, codec)
     channel.send(listOf(statusArg)) {
+      if (it is List<*>) {
+        if (it.size > 1) {
+          callback(Result.failure(FlutterError(it[0] as String, it[1] as String, it[2] as String?)))
+        } else {
+          callback(Result.success(Unit))
+        }
+      } else {
+        callback(Result.failure(MessagesPigeonUtils.createConnectionError(channelName)))
+      } 
+    }
+  }
+}
+/**
+ * Dart -> native, background isolate only.
+ *
+ * Generated interface from Pigeon that represents a handler of messages from Flutter.
+ */
+interface WearerLinkBackgroundHostApi {
+  /**
+   * Handshake from the freshly-started background isolate. Returns the raw
+   * callback handle of the user's registered handler; after this returns,
+   * the native side starts delivering queued events.
+   */
+  fun backgroundReady(): Long
+
+  companion object {
+    /** The codec used by WearerLinkBackgroundHostApi. */
+    val codec: MessageCodec<Any?> by lazy {
+      MessagesPigeonCodec()
+    }
+    /** Sets up an instance of `WearerLinkBackgroundHostApi` to handle messages through the `binaryMessenger`. */
+    @JvmOverloads
+    fun setUp(binaryMessenger: BinaryMessenger, api: WearerLinkBackgroundHostApi?, messageChannelSuffix: String = "") {
+      val separatedMessageChannelSuffix = if (messageChannelSuffix.isNotEmpty()) ".$messageChannelSuffix" else ""
+      run {
+        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.wearer_link.WearerLinkBackgroundHostApi.backgroundReady$separatedMessageChannelSuffix", codec)
+        if (api != null) {
+          channel.setMessageHandler { _, reply ->
+            val wrapped: List<Any?> = try {
+              listOf(api.backgroundReady())
+            } catch (exception: Throwable) {
+              MessagesPigeonUtils.wrapError(exception)
+            }
+            reply.reply(wrapped)
+          }
+        } else {
+          channel.setMessageHandler(null)
+        }
+      }
+    }
+  }
+}
+/**
+ * Native -> Dart, background isolate only. The completion of
+ * [onBackgroundEvent] is the delivery ack: the native side removes the
+ * event from the persistent queue only after the Dart future completes.
+ *
+ * Generated class from Pigeon that represents Flutter messages that can be called from Kotlin.
+ */
+class WearerLinkBackgroundFlutterApi(private val binaryMessenger: BinaryMessenger, private val messageChannelSuffix: String = "") {
+  companion object {
+    /** The codec used by WearerLinkBackgroundFlutterApi. */
+    val codec: MessageCodec<Any?> by lazy {
+      MessagesPigeonCodec()
+    }
+  }
+  fun onBackgroundEvent(eventArg: WearerEventDto, callback: (Result<Unit>) -> Unit)
+{
+    val separatedMessageChannelSuffix = if (messageChannelSuffix.isNotEmpty()) ".$messageChannelSuffix" else ""
+    val channelName = "dev.flutter.pigeon.wearer_link.WearerLinkBackgroundFlutterApi.onBackgroundEvent$separatedMessageChannelSuffix"
+    val channel = BasicMessageChannel<Any?>(binaryMessenger, channelName, codec)
+    channel.send(listOf(eventArg)) {
       if (it is List<*>) {
         if (it.size > 1) {
           callback(Result.failure(FlutterError(it[0] as String, it[1] as String, it[2] as String?)))

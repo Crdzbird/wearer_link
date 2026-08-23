@@ -59,6 +59,9 @@ enum WearerEventKind {
 
   /// Synced/transferred data (`syncData` / `transferData` on the other side).
   data,
+
+  /// A file (`transferFile` on the other side) — see [WearerEvent.filePath].
+  file,
 }
 
 /// An event received from the counterpart device.
@@ -71,18 +74,22 @@ class WearerEvent {
     required this.sourceNodeId,
     required this.timestamp,
     required this.deliveredWhileDead,
+    this.filePath,
   });
 
   factory WearerEvent.fromDto(WearerEventDto dto) => WearerEvent(
         id: dto.id,
-        kind: dto.kind == WearerEventKindDto.data
-            ? WearerEventKind.data
-            : WearerEventKind.message,
+        kind: switch (dto.kind) {
+          WearerEventKindDto.message => WearerEventKind.message,
+          WearerEventKindDto.data => WearerEventKind.data,
+          WearerEventKindDto.file => WearerEventKind.file,
+        },
         path: dto.path,
         payload: dto.payload,
         sourceNodeId: dto.sourceNodeId,
         timestamp: DateTime.fromMillisecondsSinceEpoch(dto.timestampMillis),
         deliveredWhileDead: dto.deliveredWhileDead,
+        filePath: dto.filePath,
       );
 
   /// Unique id, stable across background replays — use it to deduplicate
@@ -103,6 +110,12 @@ class WearerEvent {
   /// True when this event arrived while the app was not running and was
   /// replayed from the plugin's persistent queue.
   final bool deliveredWhileDead;
+
+  /// For [WearerEventKind.file] events, the absolute path of the received
+  /// file. The plugin stores it in the app's cache directory — move it
+  /// somewhere durable if you need it beyond the next cache purge.
+  /// Null for message/data events.
+  final String? filePath;
 
   @override
   String toString() =>

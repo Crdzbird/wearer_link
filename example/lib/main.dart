@@ -1,8 +1,21 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:wearer_link/wearer_link.dart';
+
+/// Runs in a headless isolate when an event arrives while the app is dead.
+/// Sends a visible ack back to the counterpart as proof of life.
+@pragma('vm:entry-point')
+Future<void> demoBackgroundHandler(WearerEvent event) async {
+  // ignore: avoid_print
+  print('wearer_link demo: background event ${event.kind.name} ${event.path}');
+  await WearerLink.instance.sendJson('/bg-ack', {
+    'handled': event.path,
+    'kind': event.kind.name,
+  });
+}
 
 void main() => runApp(const WearerLinkDemo());
 
@@ -52,8 +65,19 @@ class _HomePageState extends State<HomePage> {
           ),
         ),
       )
+      ..add(
+        _link.fileEvents.listen(
+          (e) => _append(
+            'file ${e.path}: ${e.filePath}'
+            '${e.deliveredWhileDead ? ' (replayed)' : ''}',
+          ),
+        ),
+      )
       ..add(_link.connectionState.listen((s) => setState(() => _status = s)));
     _refreshStatus();
+    _link
+        .registerBackgroundHandler(demoBackgroundHandler)
+        .catchError((Object e) => _append('bg register failed: $e'));
   }
 
   @override
@@ -146,6 +170,18 @@ class _HomePageState extends State<HomePage> {
                     ),
                   ),
                   child: const Text('Transfer'),
+                ),
+                FilledButton.tonal(
+                  onPressed: () => _run('file', () async {
+                    final file = File(
+                      '${Directory.systemTemp.path}/wearer_demo.txt',
+                    );
+                    await file.writeAsString(
+                      'file payload written at ${DateTime.now()}',
+                    );
+                    return _link.transferFile('/demo-file', file.path);
+                  }),
+                  child: const Text('Send file'),
                 ),
                 OutlinedButton(
                   onPressed: () => _run('launch', _link.launchCompanion),

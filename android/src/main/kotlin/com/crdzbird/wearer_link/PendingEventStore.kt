@@ -27,6 +27,13 @@ class PendingEventStore(context: Context) {
     write(events)
   }
 
+  /** Drop one event by id — called after a background isolate acked it. */
+  @Synchronized
+  fun remove(id: String) {
+    val events = readAll()
+    if (events.removeAll { it.id == id }) write(events)
+  }
+
   @Synchronized
   fun drain(): List<WearerEventDto> {
     val events = readAll()
@@ -58,6 +65,7 @@ class PendingEventStore(context: Context) {
     put("payload", Base64.encodeToString(e.payload, Base64.NO_WRAP))
     put("node", e.sourceNodeId)
     put("ts", e.timestampMillis)
+    e.filePath?.let { put("file", it) }
   }
 
   private fun fromJson(o: JSONObject) = WearerEventDto(
@@ -68,6 +76,7 @@ class PendingEventStore(context: Context) {
     sourceNodeId = o.getString("node"),
     timestampMillis = o.getLong("ts"),
     deliveredWhileDead = true,
+    filePath = if (o.has("file")) o.getString("file") else null,
   )
 
   private companion object {

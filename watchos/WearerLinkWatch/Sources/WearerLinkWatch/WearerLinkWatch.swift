@@ -28,6 +28,10 @@ public final class WearerLinkWatch: NSObject {
     public let payload: Data
     public let isDataEvent: Bool
     public let timestamp: Date
+
+    /// For file transfers: local URL of the received file (in Caches — move
+    /// it somewhere durable if needed). Nil for message/data events.
+    public let fileURL: URL?
   }
 
   public enum WearerError: Error {
@@ -113,6 +117,15 @@ public final class WearerLinkWatch: NSObject {
       envelope(path: path, payload: payload, kind: Envelope.kindData))
   }
 
+  /// Transfer a file to the phone (queued; delivered even if the phone app
+  /// is killed — it is background-launched, and the plugin surfaces the file
+  /// on the Dart `fileEvents` stream).
+  public func transferFile(path: String, fileURL: URL) {
+    var metadata = envelope(path: path, payload: Data(), kind: Envelope.kindFile)
+    metadata.removeValue(forKey: Envelope.payload)
+    WCSession.default.transferFile(fileURL, metadata: metadata)
+  }
+
   /// Wake the phone app in the background (delivered as a data event on the
   /// reserved path "/wearer_link/wake"). iOS never lets a watch app bring
   /// the phone app on screen; this is the closest sanctioned behavior.
@@ -132,19 +145,19 @@ public final class WearerLinkWatch: NSObject {
     ]
   }
 
-  private func handleInbound(_ dictionary: [String: Any]) {
-    guard
-      let path = dictionary[Envelope.path] as? String,
-      let payload = dictionary[Envelope.payload] as? Data
-    else { return }
+  private func handleInbound(_ dictionary: [String: Any], fileURL: URL? = nil) {
+    guard let path = dictionary[Envelope.path] as? String else { return }
+    let payload = dictionary[Envelope.payload] as? Data
+    if payload == nil && fileURL == nil { return }
     let millis = dictionary[Envelope.timestamp] as? Int64
       ?? Int64(Date().timeIntervalSince1970 * 1000)
     let event = Event(
       id: dictionary[Envelope.id] as? String ?? UUID().uuidString,
       path: path,
-      payload: payload,
+      payload: payload ?? Data(),
       isDataEvent: (dictionary[Envelope.kind] as? Int ?? 0) == Envelope.kindData,
-      timestamp: Date(timeIntervalSince1970: TimeInterval(millis) / 1000)
+      timestamp: Date(timeIntervalSince1970: TimeInterval(millis) / 1000),
+      fileURL: fileURL
     )
     DispatchQueue.main.async {
       if let handler = self.onEvent {
@@ -172,6 +185,7 @@ public final class WearerLinkWatch: NSObject {
     static let timestamp = "ts"
     static let kindMessage = 0
     static let kindData = 1
+    static let kindFile = 2
   }
 }
 
@@ -224,5 +238,23 @@ extension WearerLinkWatch: WCSessionDelegate {
     didReceiveUserInfo userInfo: [String: Any] = [:]
   ) {
     handleInbound(userInfo)
+  }
+
+  public func session(_ session: WCSession, didReceive file: WCSessionFile) {
+    // The system deletes file.fileURL when this delegate returns — copy it
+    // out synchronously before dispatching.
+    let dir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+      .appendingPathComponent("wearer_link", isDirectory: true)
+    let metadata = file.metadata ?? [:]
+    let id = metadata[Envelope.id] as? String ?? UUID().uuidString
+    let dest = dir.appendingPathComponent(id)
+    do {
+      try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+      try? FileManager.default.removeItem(at: dest)
+      try FileManager.default.copyItem(at: file.fileURL, to: dest)
+    } catch {
+      return // nothing to deliver if the copy failed
+    }
+    handleInbound(metadata, fileURL: dest)
   }
 }

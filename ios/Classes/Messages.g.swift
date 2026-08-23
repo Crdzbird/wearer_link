@@ -198,6 +198,8 @@ enum WearerEventKindDto: Int {
   case message = 0
   /// Synced or transferred data.
   case data = 1
+  /// A file received via transferFile. `filePath` points at the local copy.
+  case file = 2
 }
 
 /// Snapshot of the companion relationship.
@@ -254,6 +256,9 @@ struct WearerEventDto: Hashable {
   /// True when the event was received while no Flutter engine was attached
   /// and is being replayed from the persistent queue.
   var deliveredWhileDead: Bool
+  /// For [WearerEventKindDto.file] events: absolute path of the received
+  /// file (stored in the app's cache directory). Null for other kinds.
+  var filePath: String? = nil
 
 
   // swift-format-ignore: AlwaysUseLowerCamelCase
@@ -265,6 +270,7 @@ struct WearerEventDto: Hashable {
     let sourceNodeId = pigeonVar_list[4] as! String
     let timestampMillis = pigeonVar_list[5] as! Int64
     let deliveredWhileDead = pigeonVar_list[6] as! Bool
+    let filePath: String? = nilOrValue(pigeonVar_list[7])
 
     return WearerEventDto(
       id: id,
@@ -273,7 +279,8 @@ struct WearerEventDto: Hashable {
       payload: payload,
       sourceNodeId: sourceNodeId,
       timestampMillis: timestampMillis,
-      deliveredWhileDead: deliveredWhileDead
+      deliveredWhileDead: deliveredWhileDead,
+      filePath: filePath
     )
   }
   func toList() -> [Any?] {
@@ -285,13 +292,14 @@ struct WearerEventDto: Hashable {
       sourceNodeId,
       timestampMillis,
       deliveredWhileDead,
+      filePath,
     ]
   }
   static func == (lhs: WearerEventDto, rhs: WearerEventDto) -> Bool {
     if Swift.type(of: lhs) != Swift.type(of: rhs) {
       return false
     }
-    return deepEqualsMessages(lhs.id, rhs.id) && deepEqualsMessages(lhs.kind, rhs.kind) && deepEqualsMessages(lhs.path, rhs.path) && deepEqualsMessages(lhs.payload, rhs.payload) && deepEqualsMessages(lhs.sourceNodeId, rhs.sourceNodeId) && deepEqualsMessages(lhs.timestampMillis, rhs.timestampMillis) && deepEqualsMessages(lhs.deliveredWhileDead, rhs.deliveredWhileDead)
+    return deepEqualsMessages(lhs.id, rhs.id) && deepEqualsMessages(lhs.kind, rhs.kind) && deepEqualsMessages(lhs.path, rhs.path) && deepEqualsMessages(lhs.payload, rhs.payload) && deepEqualsMessages(lhs.sourceNodeId, rhs.sourceNodeId) && deepEqualsMessages(lhs.timestampMillis, rhs.timestampMillis) && deepEqualsMessages(lhs.deliveredWhileDead, rhs.deliveredWhileDead) && deepEqualsMessages(lhs.filePath, rhs.filePath)
   }
 
   func hash(into hasher: inout Hasher) {
@@ -303,6 +311,7 @@ struct WearerEventDto: Hashable {
     deepHashMessages(value: sourceNodeId, hasher: &hasher)
     deepHashMessages(value: timestampMillis, hasher: &hasher)
     deepHashMessages(value: deliveredWhileDead, hasher: &hasher)
+    deepHashMessages(value: filePath, hasher: &hasher)
   }
 }
 
@@ -390,6 +399,29 @@ protocol WearerLinkHostApi {
   /// Drain events persisted while the app was dead. Called by the Dart
   /// facade on startup; each drained event is also removed from the store.
   func drainPendingEvents(completion: @escaping (Result<[WearerEventDto], Error>) -> Void)
+  /// Transfer the file at [filePath] to the counterpart.
+  /// Android: ChannelClient (needs a reachable capable node).
+  /// iOS: WCSession.transferFile (queued, survives unreachability).
+  func transferFile(path: String, filePath: String, completion: @escaping (Result<Void, Error>) -> Void)
+  /// Push fresh complication data to the watch face.
+  /// iOS: transferCurrentComplicationUserInfo (budgeted by watchOS — ~50/day;
+  /// over budget it silently degrades to a regular transfer).
+  /// Android: throws 'unsupported' — use syncData + requestSurfaceUpdate
+  /// inside the Wear OS app instead.
+  func updateComplication(payload: FlutterStandardTypedData, completion: @escaping (Result<Void, Error>) -> Void)
+  /// Ask the system to re-render this app's tile or complication after its
+  /// backing state changed. Wear OS only (call it inside the watch app);
+  /// [component] is the fully-qualified class name of the app's TileService
+  /// or complication data-source service. Throws 'unsupported' on iOS.
+  func requestSurfaceUpdate(component: String, completion: @escaping (Result<Void, Error>) -> Void)
+  /// Store the callback handles powering the headless background isolate.
+  /// [dispatcherHandle] is the plugin's entrypoint; [userHandle] the app's
+  /// top-level handler. Persisted natively so events that arrive while the
+  /// app is dead can start a Dart isolate and be handled immediately.
+  func registerBackgroundHandler(dispatcherHandle: Int64, userHandle: Int64) throws
+  /// Stop launching the background isolate for dead-app events (they fall
+  /// back to the persistent queue only).
+  func clearBackgroundHandler() throws
 }
 
 /// Generated setup class from Pigeon to handle messages through the `binaryMessenger`.
@@ -523,6 +555,105 @@ class WearerLinkHostApiSetup {
     } else {
       drainPendingEventsChannel.setMessageHandler(nil)
     }
+    /// Transfer the file at [filePath] to the counterpart.
+    /// Android: ChannelClient (needs a reachable capable node).
+    /// iOS: WCSession.transferFile (queued, survives unreachability).
+    let transferFileChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.wearer_link.WearerLinkHostApi.transferFile\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+    if let api = api {
+      transferFileChannel.setMessageHandler { message, reply in
+        let args = message as! [Any?]
+        let pathArg = args[0] as! String
+        let filePathArg = args[1] as! String
+        api.transferFile(path: pathArg, filePath: filePathArg) { result in
+          switch result {
+          case .success:
+            reply(wrapResult(nil))
+          case .failure(let error):
+            reply(wrapError(error))
+          }
+        }
+      }
+    } else {
+      transferFileChannel.setMessageHandler(nil)
+    }
+    /// Push fresh complication data to the watch face.
+    /// iOS: transferCurrentComplicationUserInfo (budgeted by watchOS — ~50/day;
+    /// over budget it silently degrades to a regular transfer).
+    /// Android: throws 'unsupported' — use syncData + requestSurfaceUpdate
+    /// inside the Wear OS app instead.
+    let updateComplicationChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.wearer_link.WearerLinkHostApi.updateComplication\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+    if let api = api {
+      updateComplicationChannel.setMessageHandler { message, reply in
+        let args = message as! [Any?]
+        let payloadArg = args[0] as! FlutterStandardTypedData
+        api.updateComplication(payload: payloadArg) { result in
+          switch result {
+          case .success:
+            reply(wrapResult(nil))
+          case .failure(let error):
+            reply(wrapError(error))
+          }
+        }
+      }
+    } else {
+      updateComplicationChannel.setMessageHandler(nil)
+    }
+    /// Ask the system to re-render this app's tile or complication after its
+    /// backing state changed. Wear OS only (call it inside the watch app);
+    /// [component] is the fully-qualified class name of the app's TileService
+    /// or complication data-source service. Throws 'unsupported' on iOS.
+    let requestSurfaceUpdateChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.wearer_link.WearerLinkHostApi.requestSurfaceUpdate\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+    if let api = api {
+      requestSurfaceUpdateChannel.setMessageHandler { message, reply in
+        let args = message as! [Any?]
+        let componentArg = args[0] as! String
+        api.requestSurfaceUpdate(component: componentArg) { result in
+          switch result {
+          case .success:
+            reply(wrapResult(nil))
+          case .failure(let error):
+            reply(wrapError(error))
+          }
+        }
+      }
+    } else {
+      requestSurfaceUpdateChannel.setMessageHandler(nil)
+    }
+    /// Store the callback handles powering the headless background isolate.
+    /// [dispatcherHandle] is the plugin's entrypoint; [userHandle] the app's
+    /// top-level handler. Persisted natively so events that arrive while the
+    /// app is dead can start a Dart isolate and be handled immediately.
+    let registerBackgroundHandlerChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.wearer_link.WearerLinkHostApi.registerBackgroundHandler\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+    if let api = api {
+      registerBackgroundHandlerChannel.setMessageHandler { message, reply in
+        let args = message as! [Any?]
+        let dispatcherHandleArg = args[0] as! Int64
+        let userHandleArg = args[1] as! Int64
+        do {
+          try api.registerBackgroundHandler(dispatcherHandle: dispatcherHandleArg, userHandle: userHandleArg)
+          reply(wrapResult(nil))
+        } catch {
+          reply(wrapError(error))
+        }
+      }
+    } else {
+      registerBackgroundHandlerChannel.setMessageHandler(nil)
+    }
+    /// Stop launching the background isolate for dead-app events (they fall
+    /// back to the persistent queue only).
+    let clearBackgroundHandlerChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.wearer_link.WearerLinkHostApi.clearBackgroundHandler\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+    if let api = api {
+      clearBackgroundHandlerChannel.setMessageHandler { _, reply in
+        do {
+          try api.clearBackgroundHandler()
+          reply(wrapResult(nil))
+        } catch {
+          reply(wrapError(error))
+        }
+      }
+    } else {
+      clearBackgroundHandlerChannel.setMessageHandler(nil)
+    }
   }
 }
 /// Native -> Dart.
@@ -531,6 +662,7 @@ class WearerLinkHostApiSetup {
 protocol WearerLinkFlutterApiProtocol {
   func onMessage(event eventArg: WearerEventDto, completion: @escaping (Result<Void, PigeonError>) -> Void)
   func onDataChanged(event eventArg: WearerEventDto, completion: @escaping (Result<Void, PigeonError>) -> Void)
+  func onFileReceived(event eventArg: WearerEventDto, completion: @escaping (Result<Void, PigeonError>) -> Void)
   func onConnectionStateChanged(status statusArg: CompanionStatusDto, completion: @escaping (Result<Void, PigeonError>) -> Void)
 }
 class WearerLinkFlutterApi: WearerLinkFlutterApiProtocol {
@@ -579,10 +711,99 @@ class WearerLinkFlutterApi: WearerLinkFlutterApiProtocol {
       }
     }
   }
+  func onFileReceived(event eventArg: WearerEventDto, completion: @escaping (Result<Void, PigeonError>) -> Void) {
+    let channelName: String = "dev.flutter.pigeon.wearer_link.WearerLinkFlutterApi.onFileReceived\(messageChannelSuffix)"
+    let channel = FlutterBasicMessageChannel(name: channelName, binaryMessenger: binaryMessenger, codec: codec)
+    channel.sendMessage([eventArg] as [Any?]) { response in
+      guard let listResponse = response as? [Any?] else {
+        completion(.failure(createConnectionError(withChannelName: channelName)))
+        return
+      }
+      if listResponse.count > 1 {
+        let code: String = listResponse[0] as! String
+        let message: String? = nilOrValue(listResponse[1])
+        let details: String? = nilOrValue(listResponse[2])
+        completion(.failure(PigeonError(code: code, message: message, details: details)))
+      } else {
+        completion(.success(()))
+      }
+    }
+  }
   func onConnectionStateChanged(status statusArg: CompanionStatusDto, completion: @escaping (Result<Void, PigeonError>) -> Void) {
     let channelName: String = "dev.flutter.pigeon.wearer_link.WearerLinkFlutterApi.onConnectionStateChanged\(messageChannelSuffix)"
     let channel = FlutterBasicMessageChannel(name: channelName, binaryMessenger: binaryMessenger, codec: codec)
     channel.sendMessage([statusArg] as [Any?]) { response in
+      guard let listResponse = response as? [Any?] else {
+        completion(.failure(createConnectionError(withChannelName: channelName)))
+        return
+      }
+      if listResponse.count > 1 {
+        let code: String = listResponse[0] as! String
+        let message: String? = nilOrValue(listResponse[1])
+        let details: String? = nilOrValue(listResponse[2])
+        completion(.failure(PigeonError(code: code, message: message, details: details)))
+      } else {
+        completion(.success(()))
+      }
+    }
+  }
+}
+/// Dart -> native, background isolate only.
+///
+/// Generated protocol from Pigeon that represents a handler of messages from Flutter.
+protocol WearerLinkBackgroundHostApi {
+  /// Handshake from the freshly-started background isolate. Returns the raw
+  /// callback handle of the user's registered handler; after this returns,
+  /// the native side starts delivering queued events.
+  func backgroundReady() throws -> Int64
+}
+
+/// Generated setup class from Pigeon to handle messages through the `binaryMessenger`.
+class WearerLinkBackgroundHostApiSetup {
+  static var codec: FlutterStandardMessageCodec { MessagesPigeonCodec.shared }
+  /// Sets up an instance of `WearerLinkBackgroundHostApi` to handle messages through the `binaryMessenger`.
+  static func setUp(binaryMessenger: FlutterBinaryMessenger, api: WearerLinkBackgroundHostApi?, messageChannelSuffix: String = "") {
+    let channelSuffix = messageChannelSuffix.count > 0 ? ".\(messageChannelSuffix)" : ""
+    /// Handshake from the freshly-started background isolate. Returns the raw
+    /// callback handle of the user's registered handler; after this returns,
+    /// the native side starts delivering queued events.
+    let backgroundReadyChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.wearer_link.WearerLinkBackgroundHostApi.backgroundReady\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+    if let api = api {
+      backgroundReadyChannel.setMessageHandler { _, reply in
+        do {
+          let result = try api.backgroundReady()
+          reply(wrapResult(result))
+        } catch {
+          reply(wrapError(error))
+        }
+      }
+    } else {
+      backgroundReadyChannel.setMessageHandler(nil)
+    }
+  }
+}
+/// Native -> Dart, background isolate only. The completion of
+/// [onBackgroundEvent] is the delivery ack: the native side removes the
+/// event from the persistent queue only after the Dart future completes.
+///
+/// Generated protocol from Pigeon that represents Flutter messages that can be called from Swift.
+protocol WearerLinkBackgroundFlutterApiProtocol {
+  func onBackgroundEvent(event eventArg: WearerEventDto, completion: @escaping (Result<Void, PigeonError>) -> Void)
+}
+class WearerLinkBackgroundFlutterApi: WearerLinkBackgroundFlutterApiProtocol {
+  private let binaryMessenger: FlutterBinaryMessenger
+  private let messageChannelSuffix: String
+  init(binaryMessenger: FlutterBinaryMessenger, messageChannelSuffix: String = "") {
+    self.binaryMessenger = binaryMessenger
+    self.messageChannelSuffix = messageChannelSuffix.count > 0 ? ".\(messageChannelSuffix)" : ""
+  }
+  var codec: MessagesPigeonCodec {
+    return MessagesPigeonCodec.shared
+  }
+  func onBackgroundEvent(event eventArg: WearerEventDto, completion: @escaping (Result<Void, PigeonError>) -> Void) {
+    let channelName: String = "dev.flutter.pigeon.wearer_link.WearerLinkBackgroundFlutterApi.onBackgroundEvent\(messageChannelSuffix)"
+    let channel = FlutterBasicMessageChannel(name: channelName, binaryMessenger: binaryMessenger, codec: codec)
+    channel.sendMessage([eventArg] as [Any?]) { response in
       guard let listResponse = response as? [Any?] else {
         completion(.failure(createConnectionError(withChannelName: channelName)))
         return

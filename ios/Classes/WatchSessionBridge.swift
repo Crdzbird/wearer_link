@@ -12,6 +12,7 @@ enum Envelope {
 
   static let kindMessage = 0
   static let kindData = 1
+  static let kindFile = 2
 }
 
 /// Singleton owner of the WCSession, deliberately independent of any plugin
@@ -101,6 +102,25 @@ final class WatchSessionBridge: NSObject {
       envelope(path: path, payload: payload, kind: Envelope.kindData))
   }
 
+  func transferFile(path: String, filePath: String) throws {
+    guard FileManager.default.fileExists(atPath: filePath) else {
+      throw PigeonError(
+        code: "sendFailed", message: "No such file: \(filePath)", details: nil)
+    }
+    // Metadata carries the envelope (minus payload — the file IS the payload).
+    var metadata = envelope(path: path, payload: Data(), kind: Envelope.kindFile)
+    metadata.removeValue(forKey: Envelope.payload)
+    WCSession.default.transferFile(URL(fileURLWithPath: filePath), metadata: metadata)
+  }
+
+  /// Push fresh complication data. watchOS budgets these transfers
+  /// (`remainingComplicationUserInfoTransfers`); past the budget the system
+  /// delivers them as regular userInfo transfers instead.
+  func updateComplication(payload: Data) {
+    WCSession.default.transferCurrentComplicationUserInfo(
+      envelope(path: "/complication", payload: payload, kind: Envelope.kindData))
+  }
+
   private func envelope(path: String, payload: Data, kind: Int) -> [String: Any] {
     [
       Envelope.path: path,
@@ -113,26 +133,31 @@ final class WatchSessionBridge: NSObject {
 
   // MARK: - Inbound
 
-  private func handleInbound(_ dictionary: [String: Any]) {
-    guard
-      let path = dictionary[Envelope.path] as? String,
-      let payload = dictionary[Envelope.payload] as? Data
-    else { return }
+  private func handleInbound(_ dictionary: [String: Any], filePath: String? = nil) {
+    guard let path = dictionary[Envelope.path] as? String else { return }
+    let payload = dictionary[Envelope.payload] as? Data
+    if payload == nil && filePath == nil { return }
     let kindRaw = dictionary[Envelope.kind] as? Int ?? Envelope.kindMessage
     let event = StoredEvent(
       id: dictionary[Envelope.id] as? String ?? UUID().uuidString,
       kindRaw: kindRaw,
       path: path,
-      payload: payload,
+      payload: payload ?? Data(),
       sourceNodeId: "watch",
       timestampMillis: dictionary[Envelope.timestamp] as? Int64
-        ?? Int64(Date().timeIntervalSince1970 * 1000)
+        ?? Int64(Date().timeIntervalSince1970 * 1000),
+      filePath: filePath
     )
     DispatchQueue.main.async {
       if let dispatcher = self.liveDispatcher {
         dispatcher(event.toDto(deliveredWhileDead: false))
       } else {
+        // Persist first (crash-safe), then hand to the headless isolate if
+        // one is registered; its ack removes the queued copy.
         PendingEventStore.shared.append(event)
+        if BackgroundDispatcher.shared.isRegistered {
+          BackgroundDispatcher.shared.deliver(event.toDto(deliveredWhileDead: true))
+        }
       }
     }
   }
@@ -199,5 +224,23 @@ extension WatchSessionBridge: WCSessionDelegate {
 
   func session(_ session: WCSession, didReceiveUserInfo userInfo: [String: Any] = [:]) {
     handleInbound(userInfo)
+  }
+
+  func session(_ session: WCSession, didReceive file: WCSessionFile) {
+    // The system deletes file.fileURL when this delegate returns — copy it
+    // out synchronously before dispatching.
+    let dir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+      .appendingPathComponent("wearer_link", isDirectory: true)
+    let metadata = file.metadata ?? [:]
+    let id = metadata[Envelope.id] as? String ?? UUID().uuidString
+    let dest = dir.appendingPathComponent(id)
+    do {
+      try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+      try? FileManager.default.removeItem(at: dest)
+      try FileManager.default.copyItem(at: file.fileURL, to: dest)
+    } catch {
+      return // nothing to deliver if the copy failed
+    }
+    handleInbound(metadata, filePath: dest.path)
   }
 }

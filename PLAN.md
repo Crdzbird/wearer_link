@@ -112,7 +112,7 @@ await wearer.launchCompanion();                   // RemoteActivityHelper / star
 3. **M2 — Android**: DataLayerBridge, background `WearableListenerService` + persisted queue, `RemoteActivityHelper` launch. ✅ prototype (most complex step #1)
 4. **M3 — iOS**: WCSession bridge with launch-time activation, background wake + persisted queue, workout-gated watch launch, `WearerLinkWatch` Swift companion sources. ✅ prototype (most complex step #2)
 5. **M4 — Example + docs**: demo phone app, wiring guide (manifest entries, capabilities file, Xcode watch target steps).
-6. **M5 — Post-prototype**: headless Dart background isolate, file/channel transfers, watchOS complication push (`transferCurrentComplicationUserInfo`), Wear OS tiles, integration test harness on emulator pairs.
+6. **M5 — Post-prototype**: headless Dart background isolate, file/channel transfers, watchOS complication push (`transferCurrentComplicationUserInfo`), Wear OS tiles. ✅ implemented (isolate + files device-verified on Pixel 7 Pro + Pixel Watch 2); remaining: integration test harness on emulator pairs.
 
 ## 5. Risks / decisions taken
 

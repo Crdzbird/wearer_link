@@ -27,4 +27,12 @@ internal class WireProtocolTest {
         assertEquals("/wl/q/note/abc-123", wire)
         assertEquals("/note", WireProtocol.userPathOfQueue(wire))
     }
+
+    @Test
+    fun filePathRoundTripsAndKeepsId() {
+        val wire = WireProtocol.filePath("/photos/latest", "id-9")
+        assertEquals("/wl/f/photos/latest/id-9", wire)
+        assertEquals("/photos/latest", WireProtocol.userPathOfFile(wire))
+        assertEquals("id-9", WireProtocol.idOfFile(wire))
+    }
 }
