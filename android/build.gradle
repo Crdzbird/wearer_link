@@ -71,6 +71,9 @@ android {
 }
 
 dependencies {
+    // VERIFY: pin to the current releases before shipping; these were the
+    // latest stable versions when authored and could not be resolved in the
+    // authoring environment (no access to maven.google.com).
     implementation("com.google.android.gms:play-services-wearable:19.0.0")
     implementation("androidx.wear:wear-remote-interactions:1.1.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
