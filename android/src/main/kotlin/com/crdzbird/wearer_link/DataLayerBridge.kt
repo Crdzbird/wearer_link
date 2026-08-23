@@ -7,6 +7,8 @@ import android.net.Uri
 import androidx.wear.remote.interactions.RemoteActivityHelper
 import com.google.android.gms.common.ConnectionResult
 import com.google.android.gms.common.GoogleApiAvailability
+import com.google.android.gms.common.api.ApiException
+import com.google.android.gms.common.api.CommonStatusCodes
 import com.google.android.gms.wearable.CapabilityClient
 import com.google.android.gms.wearable.Node
 import com.google.android.gms.wearable.PutDataMapRequest
@@ -36,7 +38,17 @@ class DataLayerBridge(private val context: Context) {
     if (!isSupported()) {
       return CompanionStatusDto(ConnectionStateDto.UNSUPPORTED, emptyList())
     }
-    val connected = nodeClient.connectedNodes.await()
+    val connected = try {
+      nodeClient.connectedNodes.await()
+    } catch (e: ApiException) {
+      // On phones with no Wear pairing configured, Play services reports the
+      // Wearable API itself as unavailable (API_NOT_CONNECTED, connection
+      // result API_UNAVAILABLE). That is "no companion", not an error.
+      if (e.statusCode == CommonStatusCodes.API_NOT_CONNECTED) {
+        return CompanionStatusDto(ConnectionStateDto.UNSUPPORTED, emptyList())
+      }
+      throw e
+    }
     if (connected.isEmpty()) {
       // The Data Layer cannot distinguish "nothing paired" from "paired but
       // out of range" without a reachable node; report unreachable.
