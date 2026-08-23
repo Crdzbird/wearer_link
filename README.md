@@ -5,8 +5,12 @@ Connect a Flutter phone app with its wearable companion (**Wear OS** /
 is not running**, and mutual app launch where the platform allows it.
 
 See [PLAN.md](PLAN.md) for the architecture, platform constraints, and
-roadmap. Prototype status: Dart API + Android + iOS/watchOS implemented;
-validated with `dart analyze` and unit tests — device-pair testing pending.
+roadmap. Prototype status: Dart API + Android + iOS/watchOS implemented and
+compiled on all three toolchains. Android verified end-to-end on real
+hardware (Pixel 7 Pro + Pixel Watch 2): bidirectional messaging, sync,
+transfer, and the killed-app path (events sent while the phone app was
+force-stopped are replayed with `deliveredWhileDead: true`). iOS/watchOS
+device-pair testing pending.
 
 ## Quick start
 

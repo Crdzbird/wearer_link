@@ -20,6 +20,12 @@ Working prototype.
 
 ## 0.1.1
 
+* Android verified on real hardware (Pixel 7 Pro + Pixel Watch 2):
+  capability discovery both directions, ping/sync/transfer both directions,
+  and the background path — app force-stopped, watch sends, system restarts
+  the process for `WearerLinkListenerService`, events replay on next launch
+  with `deliveredWhileDead: true`.
+
 * First native compiles verified on a real toolchain (previously authored
   offline): Kotlin plugin + unit tests (AGP 8.11.1, Kotlin 2.2.20,
   Gradle 8.14.3), iOS `flutter build ios`, watchOS package
