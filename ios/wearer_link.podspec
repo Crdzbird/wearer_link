@@ -4,7 +4,7 @@
 #
 Pod::Spec.new do |s|
   s.name             = 'wearer_link'
-  s.version          = '0.1.0'
+  s.version          = '0.2.0'
   s.summary          = 'Phone-to-wearable link: messaging, synced data, background delivery.'
   s.description      = <<-DESC
 Connects a Flutter iPhone app with its watchOS companion via WatchConnectivity:
@@ -15,9 +15,13 @@ running, and workout-session watch launch.
   s.license          = { :file => '../LICENSE' }
   s.author           = { 'crdzbird' => 'luisalfonsocb83@gmail.com' }
   s.source           = { :path => '.' }
-  s.source_files = 'Classes/**/*'
+  # Sources live in the Swift Package Manager layout; CocoaPods reuses them.
+  s.source_files = 'wearer_link/Sources/wearer_link/**/*.swift'
+  s.resource_bundles = {
+    'wearer_link_privacy' => ['wearer_link/Sources/wearer_link/PrivacyInfo.xcprivacy']
+  }
   s.dependency 'Flutter'
-  s.platform = :ios, '13.0'
+  s.platform = :ios, '15.0'
   s.frameworks = 'WatchConnectivity', 'HealthKit'
 
   # Flutter.framework does not contain a i386 slice.

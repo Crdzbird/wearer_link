@@ -1,27 +1,15 @@
 PODS:
   - Flutter (1.0.0)
-  - integration_test (0.0.1):
-    - Flutter
-  - wearer_link (0.1.0):
-    - Flutter
 
 DEPENDENCIES:
   - Flutter (from `Flutter`)
-  - integration_test (from `.symlinks/plugins/integration_test/ios`)
-  - wearer_link (from `.symlinks/plugins/wearer_link/ios`)
 
 EXTERNAL SOURCES:
   Flutter:
     :path: Flutter
-  integration_test:
-    :path: ".symlinks/plugins/integration_test/ios"
-  wearer_link:
-    :path: ".symlinks/plugins/wearer_link/ios"
 
 SPEC CHECKSUMS:
   Flutter: 71a624a5bc0c04062bf19101d501e466baf2fb47
-  integration_test: 252f60fa39af5e17c3aa9899d35d908a0721b573
-  wearer_link: a666e6292e3c4a8b421c50298bd7cf36f0435fed
 
 PODFILE CHECKSUM: 3ba3a73b1b12adcf321a227a745625fe0888cc82
 

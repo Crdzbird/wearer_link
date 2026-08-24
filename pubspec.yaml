@@ -4,7 +4,15 @@ description: >-
   bidirectional messaging, synced data, background delivery while the app is
   not running, and mutual app launch where the platform allows it.
 version: 0.2.0
-homepage: https://github.com/crdzbird/wearer_link
+homepage: https://github.com/Crdzbird/wearer_link
+repository: https://github.com/Crdzbird/wearer_link
+issue_tracker: https://github.com/Crdzbird/wearer_link/issues
+topics:
+  - wearable
+  - wear-os
+  - watchos
+  - watch
+  - connectivity
 
 environment:
   sdk: ^3.9.0

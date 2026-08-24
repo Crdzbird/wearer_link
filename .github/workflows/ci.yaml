@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  push:
+    branches: ['main', 'master', 'claude/**']
+  pull_request:
+
+jobs:
+  dart:
+    name: Analyze + Dart tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - run: flutter analyze
+      - run: flutter test
+      - name: Example tests
+        run: |
+          cd example
+          flutter analyze
+          flutter test
+
+  android:
+    name: Kotlin compile + tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - name: Compile plugin Kotlin and run unit tests
+        run: |
+          cd example
+          flutter build apk --debug
+          cd android
+          ./gradlew :wearer_link:testDebugUnitTest
+
+  ios:
+    name: iOS + watchOS compile
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - name: Build example for iOS (no codesign)
+        run: |
+          cd example
+          flutter build ios --no-codesign
+      - name: Build watchOS companion package
+        run: |
+          cd watchos/WearerLinkWatch
+          xcodebuild -scheme WearerLinkWatch -destination 'generic/platform=watchOS' build
