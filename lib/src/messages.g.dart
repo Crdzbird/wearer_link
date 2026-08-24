@@ -131,6 +131,16 @@ enum WearerEventKindDto {
   file,
 }
 
+/// How (whether) this device can launch the companion app.
+enum CompanionLaunchDto {
+  /// RemoteActivityHelper: opens the companion in the foreground.
+  foreground,
+  /// HealthKit workout session only (iOS -> watchOS).
+  workoutOnly,
+  /// The OS offers no way to launch the counterpart app.
+  none,
+}
+
 /// Snapshot of the companion relationship.
 class CompanionStatusDto {
   CompanionStatusDto({
@@ -260,6 +270,106 @@ class WearerEventDto {
   int get hashCode => _deepHash(<Object?>[runtimeType, ..._toList()]);
 }
 
+/// What this device/pairing actually supports. Static OS facts plus the
+/// dynamic ones (e.g. HealthKit availability); honest, never aspirational.
+class WearerCapabilitiesDto {
+  WearerCapabilitiesDto({
+    required this.message,
+    required this.request,
+    required this.syncData,
+    required this.transferData,
+    required this.transferFile,
+    required this.stream,
+    required this.companionLaunch,
+    required this.complicationPush,
+    required this.surfaceUpdate,
+    required this.backgroundWake,
+    required this.maxMessageBytes,
+  });
+
+  bool message;
+
+  bool request;
+
+  bool syncData;
+
+  bool transferData;
+
+  bool transferFile;
+
+  /// Bidirectional streams: native ChannelClient streams on Android,
+  /// sendMessage-framed emulation on iOS (needs a reachable counterpart).
+  bool stream;
+
+  CompanionLaunchDto companionLaunch;
+
+  /// transferCurrentComplicationUserInfo (iOS only).
+  bool complicationPush;
+
+  /// Tile/complication re-render requests (Wear OS only).
+  bool surfaceUpdate;
+
+  /// Events delivered while the app is killed (listener service /
+  /// WatchConnectivity background launch).
+  bool backgroundWake;
+
+  /// Safe upper bound for a single sendMessage/sendRequest payload.
+  /// transferData has no limit (large payloads route through a file).
+  int maxMessageBytes;
+
+  List<Object?> _toList() {
+    return <Object?>[
+      message,
+      request,
+      syncData,
+      transferData,
+      transferFile,
+      stream,
+      companionLaunch,
+      complicationPush,
+      surfaceUpdate,
+      backgroundWake,
+      maxMessageBytes,
+    ];
+  }
+
+  Object encode() {
+    return _toList();  }
+
+  static WearerCapabilitiesDto decode(Object result) {
+    result as List<Object?>;
+    return WearerCapabilitiesDto(
+      message: result[0]! as bool,
+      request: result[1]! as bool,
+      syncData: result[2]! as bool,
+      transferData: result[3]! as bool,
+      transferFile: result[4]! as bool,
+      stream: result[5]! as bool,
+      companionLaunch: result[6]! as CompanionLaunchDto,
+      complicationPush: result[7]! as bool,
+      surfaceUpdate: result[8]! as bool,
+      backgroundWake: result[9]! as bool,
+      maxMessageBytes: result[10]! as int,
+    );
+  }
+
+  @override
+  // ignore: avoid_equals_and_hash_code_on_mutable_classes
+  bool operator ==(Object other) {
+    if (other is! WearerCapabilitiesDto || other.runtimeType != runtimeType) {
+      return false;
+    }
+    if (identical(this, other)) {
+      return true;
+    }
+    return _deepEquals(message, other.message) && _deepEquals(request, other.request) && _deepEquals(syncData, other.syncData) && _deepEquals(transferData, other.transferData) && _deepEquals(transferFile, other.transferFile) && _deepEquals(stream, other.stream) && _deepEquals(companionLaunch, other.companionLaunch) && _deepEquals(complicationPush, other.complicationPush) && _deepEquals(surfaceUpdate, other.surfaceUpdate) && _deepEquals(backgroundWake, other.backgroundWake) && _deepEquals(maxMessageBytes, other.maxMessageBytes);
+  }
+
+  @override
+  // ignore: avoid_equals_and_hash_code_on_mutable_classes
+  int get hashCode => _deepHash(<Object?>[runtimeType, ..._toList()]);
+}
+
 
 class _PigeonCodec extends StandardMessageCodec {
   const _PigeonCodec();
@@ -274,11 +384,17 @@ class _PigeonCodec extends StandardMessageCodec {
     }    else if (value is WearerEventKindDto) {
       buffer.putUint8(130);
       writeValue(buffer, value.index);
-    }    else if (value is CompanionStatusDto) {
+    }    else if (value is CompanionLaunchDto) {
       buffer.putUint8(131);
+      writeValue(buffer, value.index);
+    }    else if (value is CompanionStatusDto) {
+      buffer.putUint8(132);
       writeValue(buffer, value.encode());
     }    else if (value is WearerEventDto) {
-      buffer.putUint8(132);
+      buffer.putUint8(133);
+      writeValue(buffer, value.encode());
+    }    else if (value is WearerCapabilitiesDto) {
+      buffer.putUint8(134);
       writeValue(buffer, value.encode());
     } else {
       super.writeValue(buffer, value);
@@ -295,9 +411,14 @@ class _PigeonCodec extends StandardMessageCodec {
         final value = readValue(buffer) as int?;
         return value == null ? null : WearerEventKindDto.values[value];
       case 131:
-        return CompanionStatusDto.decode(readValue(buffer)!);
+        final value = readValue(buffer) as int?;
+        return value == null ? null : CompanionLaunchDto.values[value];
       case 132:
+        return CompanionStatusDto.decode(readValue(buffer)!);
+      case 133:
         return WearerEventDto.decode(readValue(buffer)!);
+      case 134:
+        return WearerCapabilitiesDto.decode(readValue(buffer)!);
       default:
         return super.readValueOfType(type, buffer);
     }
@@ -633,6 +754,127 @@ class WearerLinkHostApi {
     )
     ;
   }
+
+  /// What this device/pairing actually supports.
+  Future<WearerCapabilitiesDto> getCapabilities() async {
+    final pigeonVar_channelName = 'dev.flutter.pigeon.wearer_link.WearerLinkHostApi.getCapabilities$pigeonVar_messageChannelSuffix';
+    final pigeonVar_channel = BasicMessageChannel<Object?>(
+      pigeonVar_channelName,
+      pigeonChannelCodec,
+      binaryMessenger: pigeonVar_binaryMessenger,
+    );
+    final Future<Object?> pigeonVar_sendFuture = pigeonVar_channel.send(null);
+    final pigeonVar_replyList = await pigeonVar_sendFuture as List<Object?>?;
+
+    final Object? pigeonVar_replyValue = _extractReplyValueOrThrow(
+        pigeonVar_replyList,
+        pigeonVar_channelName,
+        isNullValid: false,
+    )
+    ;
+    return pigeonVar_replyValue! as WearerCapabilitiesDto;
+  }
+
+  /// While disabled, nothing is delivered to Dart or the background
+  /// isolate — every inbound event diverts to the persistent queue (same
+  /// path as a killed app; nothing is lost) and incoming streams are
+  /// rejected. Persisted across launches.
+  Future<void> setEventDeliveryEnabled(bool enabled) async {
+    final pigeonVar_channelName = 'dev.flutter.pigeon.wearer_link.WearerLinkHostApi.setEventDeliveryEnabled$pigeonVar_messageChannelSuffix';
+    final pigeonVar_channel = BasicMessageChannel<Object?>(
+      pigeonVar_channelName,
+      pigeonChannelCodec,
+      binaryMessenger: pigeonVar_binaryMessenger,
+    );
+    final Future<Object?> pigeonVar_sendFuture = pigeonVar_channel.send(<Object?>[enabled]);
+    final pigeonVar_replyList = await pigeonVar_sendFuture as List<Object?>?;
+
+    _extractReplyValueOrThrow(
+        pigeonVar_replyList,
+        pigeonVar_channelName,
+        isNullValid: true,
+    )
+    ;
+  }
+
+  Future<bool> isEventDeliveryEnabled() async {
+    final pigeonVar_channelName = 'dev.flutter.pigeon.wearer_link.WearerLinkHostApi.isEventDeliveryEnabled$pigeonVar_messageChannelSuffix';
+    final pigeonVar_channel = BasicMessageChannel<Object?>(
+      pigeonVar_channelName,
+      pigeonChannelCodec,
+      binaryMessenger: pigeonVar_binaryMessenger,
+    );
+    final Future<Object?> pigeonVar_sendFuture = pigeonVar_channel.send(null);
+    final pigeonVar_replyList = await pigeonVar_sendFuture as List<Object?>?;
+
+    final Object? pigeonVar_replyValue = _extractReplyValueOrThrow(
+        pigeonVar_replyList,
+        pigeonVar_channelName,
+        isNullValid: false,
+    )
+    ;
+    return pigeonVar_replyValue! as bool;
+  }
+
+  /// Open a bidirectional stream to the counterpart; resolves with the
+  /// stream id once the counterpart accepted. Requires a reachable node.
+  Future<String> openStream(String path, String? nodeId) async {
+    final pigeonVar_channelName = 'dev.flutter.pigeon.wearer_link.WearerLinkHostApi.openStream$pigeonVar_messageChannelSuffix';
+    final pigeonVar_channel = BasicMessageChannel<Object?>(
+      pigeonVar_channelName,
+      pigeonChannelCodec,
+      binaryMessenger: pigeonVar_binaryMessenger,
+    );
+    final Future<Object?> pigeonVar_sendFuture = pigeonVar_channel.send(<Object?>[path, nodeId]);
+    final pigeonVar_replyList = await pigeonVar_sendFuture as List<Object?>?;
+
+    final Object? pigeonVar_replyValue = _extractReplyValueOrThrow(
+        pigeonVar_replyList,
+        pigeonVar_channelName,
+        isNullValid: false,
+    )
+    ;
+    return pigeonVar_replyValue! as String;
+  }
+
+  /// Write bytes to an open stream (chunked internally where the transport
+  /// needs it). Fails if the stream is closed.
+  Future<void> sendStreamData(String streamId, Uint8List data) async {
+    final pigeonVar_channelName = 'dev.flutter.pigeon.wearer_link.WearerLinkHostApi.sendStreamData$pigeonVar_messageChannelSuffix';
+    final pigeonVar_channel = BasicMessageChannel<Object?>(
+      pigeonVar_channelName,
+      pigeonChannelCodec,
+      binaryMessenger: pigeonVar_binaryMessenger,
+    );
+    final Future<Object?> pigeonVar_sendFuture = pigeonVar_channel.send(<Object?>[streamId, data]);
+    final pigeonVar_replyList = await pigeonVar_sendFuture as List<Object?>?;
+
+    _extractReplyValueOrThrow(
+        pigeonVar_replyList,
+        pigeonVar_channelName,
+        isNullValid: true,
+    )
+    ;
+  }
+
+  /// Close a stream (both directions). Idempotent.
+  Future<void> closeStream(String streamId) async {
+    final pigeonVar_channelName = 'dev.flutter.pigeon.wearer_link.WearerLinkHostApi.closeStream$pigeonVar_messageChannelSuffix';
+    final pigeonVar_channel = BasicMessageChannel<Object?>(
+      pigeonVar_channelName,
+      pigeonChannelCodec,
+      binaryMessenger: pigeonVar_binaryMessenger,
+    );
+    final Future<Object?> pigeonVar_sendFuture = pigeonVar_channel.send(<Object?>[streamId]);
+    final pigeonVar_replyList = await pigeonVar_sendFuture as List<Object?>?;
+
+    _extractReplyValueOrThrow(
+        pigeonVar_replyList,
+        pigeonVar_channelName,
+        isNullValid: true,
+    )
+    ;
+  }
 }
 
 /// Native -> Dart.
@@ -650,6 +892,15 @@ abstract class WearerLinkFlutterApi {
   void onFileReceived(WearerEventDto event);
 
   void onConnectionStateChanged(CompanionStatusDto status);
+
+  /// A stream was opened — locally initiated (incoming=false, resolves the
+  /// pending openStream) or by the counterpart (incoming=true).
+  void onStreamOpened(String streamId, String path, String sourceNodeId, bool incoming);
+
+  void onStreamData(String streamId, Uint8List data);
+
+  /// The stream ended; [error] is null for an orderly close.
+  void onStreamClosed(String streamId, String? error);
 
   static void setUp(WearerLinkFlutterApi? api, {BinaryMessenger? binaryMessenger, String messageChannelSuffix = '',}) {
     messageChannelSuffix = messageChannelSuffix.isNotEmpty ? '.$messageChannelSuffix' : '';
@@ -749,6 +1000,74 @@ abstract class WearerLinkFlutterApi {
           final CompanionStatusDto arg_status = args[0]! as CompanionStatusDto;
           try {
             api.onConnectionStateChanged(arg_status);
+            return wrapResponse(empty: true);
+          } on PlatformException catch (e) {
+            return wrapResponse(error: e);
+          }          catch (e) {
+            return wrapResponse(error: PlatformException(code: 'error', message: e.toString()));
+          }
+        });
+      }
+    }
+    {
+      final pigeonVar_channel = BasicMessageChannel<Object?>(
+          'dev.flutter.pigeon.wearer_link.WearerLinkFlutterApi.onStreamOpened$messageChannelSuffix', pigeonChannelCodec,
+          binaryMessenger: binaryMessenger);
+      if (api == null) {
+        pigeonVar_channel.setMessageHandler(null);
+      } else {
+        pigeonVar_channel.setMessageHandler((Object? message) async {
+          final List<Object?> args = message! as List<Object?>;
+          final String arg_streamId = args[0]! as String;
+          final String arg_path = args[1]! as String;
+          final String arg_sourceNodeId = args[2]! as String;
+          final bool arg_incoming = args[3]! as bool;
+          try {
+            api.onStreamOpened(arg_streamId, arg_path, arg_sourceNodeId, arg_incoming);
+            return wrapResponse(empty: true);
+          } on PlatformException catch (e) {
+            return wrapResponse(error: e);
+          }          catch (e) {
+            return wrapResponse(error: PlatformException(code: 'error', message: e.toString()));
+          }
+        });
+      }
+    }
+    {
+      final pigeonVar_channel = BasicMessageChannel<Object?>(
+          'dev.flutter.pigeon.wearer_link.WearerLinkFlutterApi.onStreamData$messageChannelSuffix', pigeonChannelCodec,
+          binaryMessenger: binaryMessenger);
+      if (api == null) {
+        pigeonVar_channel.setMessageHandler(null);
+      } else {
+        pigeonVar_channel.setMessageHandler((Object? message) async {
+          final List<Object?> args = message! as List<Object?>;
+          final String arg_streamId = args[0]! as String;
+          final Uint8List arg_data = args[1]! as Uint8List;
+          try {
+            api.onStreamData(arg_streamId, arg_data);
+            return wrapResponse(empty: true);
+          } on PlatformException catch (e) {
+            return wrapResponse(error: e);
+          }          catch (e) {
+            return wrapResponse(error: PlatformException(code: 'error', message: e.toString()));
+          }
+        });
+      }
+    }
+    {
+      final pigeonVar_channel = BasicMessageChannel<Object?>(
+          'dev.flutter.pigeon.wearer_link.WearerLinkFlutterApi.onStreamClosed$messageChannelSuffix', pigeonChannelCodec,
+          binaryMessenger: binaryMessenger);
+      if (api == null) {
+        pigeonVar_channel.setMessageHandler(null);
+      } else {
+        pigeonVar_channel.setMessageHandler((Object? message) async {
+          final List<Object?> args = message! as List<Object?>;
+          final String arg_streamId = args[0]! as String;
+          final String? arg_error = args[1] as String?;
+          try {
+            api.onStreamClosed(arg_streamId, arg_error);
             return wrapResponse(empty: true);
           } on PlatformException catch (e) {
             return wrapResponse(error: e);

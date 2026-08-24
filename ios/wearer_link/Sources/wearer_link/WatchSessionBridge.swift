@@ -1,5 +1,6 @@
 import Flutter
 import Foundation
+import HealthKit
 import WatchConnectivity
 
 /// Envelope keys shared with the watchOS companion library.
@@ -15,6 +16,15 @@ enum Envelope {
   static let kindData = 1
   static let kindFile = 2
   static let kindRequest = 3
+  static let kindStream = 4
+
+  /// Oversized transferData payloads travel as files whose path carries
+  /// this marker; the receiver restores them into plain data events.
+  /// CONTRACT: mirrored on Android/watchOS.
+  static let blobMarker = "/__wlblob"
+
+  /// Payloads above this route through the blob file path.
+  static let maxMessageBytes = 56 * 1024
 
   /// Reply-dictionary keys for request round trips.
   static let replyPayload = "d"
@@ -157,9 +167,45 @@ final class WatchSessionBridge: NSObject {
     try session.updateApplicationContext(context)
   }
 
-  func transferData(path: String, payload: Data) {
+  func transferData(path: String, payload: Data) throws {
+    if payload.count > Envelope.maxMessageBytes {
+      // Too big for a userInfo transfer: travel as a file, arrive as a
+      // plain data event on the other side.
+      let temp = FileManager.default.temporaryDirectory
+        .appendingPathComponent("wearer_blob_\(UUID().uuidString)")
+      try payload.write(to: temp)
+      defer { try? FileManager.default.removeItem(at: temp) }
+      try transferFile(path: Envelope.blobMarker + path, filePath: temp.path)
+      return
+    }
     WCSession.default.transferUserInfo(
       envelope(path: path, payload: payload, kind: Envelope.kindData))
+  }
+
+  var deliveryEnabled: Bool {
+    UserDefaults.standard.object(forKey: "wearer_link_delivery_enabled") as? Bool ?? true
+  }
+
+  func setDeliveryEnabled(_ enabled: Bool) {
+    UserDefaults.standard.set(enabled, forKey: "wearer_link_delivery_enabled")
+    if !enabled { StreamRegistry.shared.closeAll() }
+  }
+
+  func capabilities() -> WearerCapabilitiesDto {
+    let supported = WCSession.isSupported()
+    return WearerCapabilitiesDto(
+      message: supported,
+      request: supported,
+      syncData: supported,
+      transferData: supported,
+      transferFile: supported,
+      stream: supported,
+      companionLaunch: supported && HKHealthStore.isHealthDataAvailable()
+        ? .workoutOnly : .none,
+      complicationPush: supported,
+      surfaceUpdate: false,  // Wear OS-only primitive
+      backgroundWake: supported,
+      maxMessageBytes: Int64(Envelope.maxMessageBytes))
   }
 
   func transferFile(path: String, filePath: String) throws {
@@ -209,6 +255,11 @@ final class WatchSessionBridge: NSObject {
       filePath: filePath
     )
     DispatchQueue.main.async {
+      if !self.deliveryEnabled {
+        // Delivery paused: divert to the queue, wake nothing.
+        PendingEventStore.shared.append(event)
+        return
+      }
       if let dispatcher = self.liveDispatcher {
         dispatcher(event.toDto(deliveredWhileDead: false))
       } else {
@@ -258,6 +309,10 @@ extension WatchSessionBridge: WCSessionDelegate {
   }
 
   func session(_ session: WCSession, didReceiveMessage message: [String: Any]) {
+    if (message[Envelope.kind] as? Int) == Envelope.kindStream {
+      DispatchQueue.main.async { StreamRegistry.shared.handleFrame(message) }
+      return
+    }
     handleInbound(message)
   }
 
@@ -266,12 +321,23 @@ extension WatchSessionBridge: WCSessionDelegate {
     didReceiveMessage message: [String: Any],
     replyHandler: @escaping ([String: Any]) -> Void
   ) {
-    if (message[Envelope.kind] as? Int) == Envelope.kindRequest {
+    switch message[Envelope.kind] as? Int {
+    case Envelope.kindRequest:
+      guard deliveryEnabled else {
+        replyHandler([StreamRegistry.Frame.err: "deliveryDisabled"])
+        return
+      }
       handleRequest(message, replyHandler: replyHandler)
-      return
+    case Envelope.kindStream:
+      let enabled = deliveryEnabled
+      DispatchQueue.main.async {
+        StreamRegistry.shared.handleOpen(
+          message, deliveryEnabled: enabled, replyHandler: replyHandler)
+      }
+    default:
+      handleInbound(message)
+      replyHandler([:])
     }
-    handleInbound(message)
-    replyHandler([:])
   }
 
   /// Requests need a live Dart handler right now — the sender is waiting —
@@ -342,6 +408,18 @@ extension WatchSessionBridge: WCSessionDelegate {
       try FileManager.default.copyItem(at: file.fileURL, to: dest)
     } catch {
       return // nothing to deliver if the copy failed
+    }
+    if let path = metadata[Envelope.path] as? String,
+      path.hasPrefix(Envelope.blobMarker) {
+      // Oversized transferData that traveled as a file: back into bytes.
+      guard let payload = try? Data(contentsOf: dest) else { return }
+      try? FileManager.default.removeItem(at: dest)
+      var restored = metadata
+      restored[Envelope.path] = String(path.dropFirst(Envelope.blobMarker.count))
+      restored[Envelope.payload] = payload
+      restored[Envelope.kind] = Envelope.kindData
+      handleInbound(restored)
+      return
     }
     handleInbound(metadata, filePath: dest.path)
   }

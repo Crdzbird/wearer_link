@@ -28,6 +28,22 @@ object WireProtocol {
   /** Request/response RPC: MessageClient path = "/wl/r<userPath>". */
   const val REQUEST_PREFIX = "$PREFIX/r"
 
+  /** Bidirectional streams: ChannelClient path = "/wl/c<userPath>/<uuid>". */
+  const val STREAM_PREFIX = "$PREFIX/c"
+
+  /**
+   * transferData payloads too large for a DataItem travel as a file whose
+   * user path carries this marker; the receiver turns them back into a
+   * plain data event. CONTRACT: mirrored on iOS/watchOS.
+   */
+  const val BLOB_MARKER = "/__wlblob"
+
+  /** Payloads above this route through the blob file path (DataItem cap ~100KB). */
+  const val MAX_DATA_ITEM_BYTES = 90 * 1024
+
+  /** Safe single-message payload bound reported by getCapabilities. */
+  const val MAX_MESSAGE_BYTES = 90 * 1024
+
   const val KEY_PAYLOAD = "payload"
   const val KEY_ID = "id"
   const val KEY_TIMESTAMP = "ts"
@@ -61,4 +77,13 @@ object WireProtocol {
 
   /** "/wl/f/foo/bar/<uuid>" -> "<uuid>". */
   fun idOfFile(wirePath: String) = wirePath.substringAfterLast('/')
+
+  fun streamPath(userPath: String, id: String) = "$STREAM_PREFIX$userPath/$id"
+
+  /** "/wl/c/foo/<uuid>" -> "/foo". */
+  fun userPathOfStream(wirePath: String) =
+    wirePath.removePrefix(STREAM_PREFIX).substringBeforeLast('/')
+
+  /** "/wl/c/foo/<uuid>" -> "<uuid>". */
+  fun idOfStream(wirePath: String) = wirePath.substringAfterLast('/')
 }

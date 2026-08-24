@@ -7,9 +7,11 @@ import 'package:flutter/services.dart';
 import 'src/background.dart';
 import 'src/messages.g.dart';
 import 'src/models.dart';
+import 'src/stream.dart';
 
 export 'src/background.dart' show WearerBackgroundHandler;
 export 'src/models.dart';
+export 'src/stream.dart' show WearerStream;
 
 /// Entry point for phone ⇄ wearable communication.
 ///
@@ -36,6 +38,8 @@ class WearerLink {
   // ignore: unused_field
   _WearerLinkFlutterApiImpl? _flutterApi;
 
+  final _streams = <String, WearerStream>{};
+  final _incomingStreams = StreamController<WearerStream>.broadcast();
   final _messages = StreamController<WearerEvent>.broadcast();
   final _dataEvents = StreamController<WearerEvent>.broadcast();
   final _fileEvents = StreamController<WearerEvent>.broadcast();
@@ -55,6 +59,45 @@ class WearerLink {
   /// Whether this device has a wearable stack at all
   /// (Google Play services / WatchConnectivity support).
   Future<bool> get isSupported => _guard(() => _host.isSupported());
+
+  /// What this device/pairing actually supports — check before relying on a
+  /// platform-gated feature instead of catching `unsupported` errors.
+  Future<WearerCapabilities> getCapabilities() => _guard(
+        () async => WearerCapabilities.fromDto(await _host.getCapabilities()),
+      );
+
+  /// Pause/resume all delivery. While disabled every inbound event diverts
+  /// to the persistent queue — the same lossless path as a killed app — and
+  /// incoming streams are rejected. Re-enabling replays what queued up.
+  Future<void> setEventDeliveryEnabled(bool enabled) async {
+    await _guard(() => _host.setEventDeliveryEnabled(enabled));
+    if (enabled) {
+      // Whatever queued up while paused replays immediately.
+      _drained = false;
+      _scheduleDrain();
+    }
+  }
+
+  /// Whether delivery is currently enabled (see [setEventDeliveryEnabled]).
+  Future<bool> isEventDeliveryEnabled() =>
+      _guard(() => _host.isEventDeliveryEnabled());
+
+  /// Open a bidirectional byte stream to the counterpart. Requires a
+  /// reachable node; see [WearerStream] for the lifecycle. On Android with
+  /// several watches pass [nodeId] to pick one.
+  Future<WearerStream> openStream(String path, {String? nodeId}) =>
+      _guard(() async {
+        final id = await _host.openStream(path, nodeId);
+        // onStreamOpened(incoming: false) usually arrives first and has the
+        // peer node id; fall back to registering here if it hasn't.
+        return _streams.putIfAbsent(
+          id,
+          () => WearerStream.internal(id, path, nodeId ?? '', _host),
+        );
+      });
+
+  /// Streams the counterpart opened toward this device.
+  Stream<WearerStream> get incomingStreams => _incomingStreams.stream;
 
   /// Current pairing/reachability snapshot.
   Future<WearerCompanionStatus> getCompanionStatus() => _guard(() async =>
@@ -301,4 +344,27 @@ class _WearerLinkFlutterApiImpl implements WearerLinkFlutterApi {
   @override
   void onConnectionStateChanged(CompanionStatusDto status) =>
       _link._connection.add(WearerCompanionStatus.fromDto(status));
+
+  @override
+  void onStreamOpened(
+    String streamId,
+    String path,
+    String sourceNodeId,
+    bool incoming,
+  ) {
+    final stream = _link._streams.putIfAbsent(
+      streamId,
+      () => WearerStream.internal(streamId, path, sourceNodeId, _link._host),
+    );
+    if (incoming) _link._incomingStreams.add(stream);
+  }
+
+  @override
+  void onStreamData(String streamId, Uint8List data) =>
+      _link._streams[streamId]?.addData(data);
+
+  @override
+  void onStreamClosed(String streamId, String? error) {
+    _link._streams.remove(streamId)?.markClosed(error);
+  }
 }

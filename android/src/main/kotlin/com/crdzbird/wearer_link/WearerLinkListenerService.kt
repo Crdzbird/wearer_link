@@ -89,6 +89,11 @@ class WearerLinkListenerService : WearableListenerService() {
    */
   override fun onRequest(nodeId: String, path: String, request: ByteArray): Task<ByteArray>? {
     if (!path.startsWith(WireProtocol.REQUEST_PREFIX)) return null
+    if (!DeliveryGate.isEnabled(this)) {
+      return Tasks.forException(
+        IllegalStateException("wearer_link: delivery is disabled on this device"),
+      )
+    }
     val handler = WearerLinkPlugin.liveRequestHandler
       ?: return Tasks.forException(
         IllegalStateException("wearer_link: app has no live request handler"),
@@ -123,6 +128,10 @@ class WearerLinkListenerService : WearableListenerService() {
 
   override fun onChannelOpened(channel: ChannelClient.Channel) {
     val wirePath = channel.path
+    if (wirePath.startsWith(WireProtocol.STREAM_PREFIX)) {
+      StreamRegistry.accept(this, channel)
+      return
+    }
     if (!wirePath.startsWith(WireProtocol.FILE_PREFIX)) return
     // Destination is derived from the wire path alone so onInputClosed can
     // find it even if the service was recycled in between.
@@ -142,11 +151,32 @@ class WearerLinkListenerService : WearableListenerService() {
       file.delete() // partial transfer — the sender sees the failure
       return
     }
+    val userPath = WireProtocol.userPathOfFile(wirePath)
+    if (userPath.startsWith(WireProtocol.BLOB_MARKER)) {
+      // Oversized transferData that traveled as a file: back into bytes.
+      val payload = try {
+        file.readBytes()
+      } finally {
+        file.delete()
+      }
+      dispatch(
+        WearerEventDto(
+          id = WireProtocol.idOfFile(wirePath),
+          kind = WearerEventKindDto.DATA,
+          path = userPath.removePrefix(WireProtocol.BLOB_MARKER),
+          payload = payload,
+          sourceNodeId = channel.nodeId,
+          timestampMillis = System.currentTimeMillis(),
+          deliveredWhileDead = WearerLinkPlugin.liveDispatcher == null,
+        ),
+      )
+      return
+    }
     dispatch(
       WearerEventDto(
         id = WireProtocol.idOfFile(wirePath),
         kind = WearerEventKindDto.FILE,
-        path = WireProtocol.userPathOfFile(wirePath),
+        path = userPath,
         payload = ByteArray(0),
         sourceNodeId = channel.nodeId,
         timestampMillis = System.currentTimeMillis(),
@@ -163,6 +193,11 @@ class WearerLinkListenerService : WearableListenerService() {
   }
 
   private fun dispatch(dto: WearerEventDto) {
+    if (!DeliveryGate.isEnabled(this)) {
+      // Delivery paused: divert everything to the queue, wake nothing.
+      PendingEventStore(this).append(dto.copy(deliveredWhileDead = true))
+      return
+    }
     val live = WearerLinkPlugin.liveDispatcher
     if (live != null) {
       mainHandler.post {

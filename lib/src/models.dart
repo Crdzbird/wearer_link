@@ -123,6 +123,88 @@ class WearerEvent {
       '${deliveredWhileDead ? ', replayed' : ''})';
 }
 
+/// How (whether) this device can launch the companion app.
+enum WearerCompanionLaunch {
+  /// Opens the companion app in the foreground (Android/Wear OS).
+  foreground,
+
+  /// Only via a HealthKit workout session (iOS -> watchOS).
+  workoutOnly,
+
+  /// The OS offers no way to launch the counterpart app.
+  none;
+
+  static WearerCompanionLaunch fromDto(CompanionLaunchDto dto) =>
+      switch (dto) {
+        CompanionLaunchDto.foreground => foreground,
+        CompanionLaunchDto.workoutOnly => workoutOnly,
+        CompanionLaunchDto.none => none,
+      };
+}
+
+/// What this device/pairing actually supports. Honest OS facts — a `false`
+/// here is an OS policy, not a plugin gap.
+class WearerCapabilities {
+  const WearerCapabilities({
+    required this.message,
+    required this.request,
+    required this.syncData,
+    required this.transferData,
+    required this.transferFile,
+    required this.stream,
+    required this.companionLaunch,
+    required this.complicationPush,
+    required this.surfaceUpdate,
+    required this.backgroundWake,
+    required this.maxMessageBytes,
+  });
+
+  factory WearerCapabilities.fromDto(WearerCapabilitiesDto dto) =>
+      WearerCapabilities(
+        message: dto.message,
+        request: dto.request,
+        syncData: dto.syncData,
+        transferData: dto.transferData,
+        transferFile: dto.transferFile,
+        stream: dto.stream,
+        companionLaunch: WearerCompanionLaunch.fromDto(dto.companionLaunch),
+        complicationPush: dto.complicationPush,
+        surfaceUpdate: dto.surfaceUpdate,
+        backgroundWake: dto.backgroundWake,
+        maxMessageBytes: dto.maxMessageBytes,
+      );
+
+  final bool message;
+  final bool request;
+  final bool syncData;
+  final bool transferData;
+  final bool transferFile;
+
+  /// Bidirectional streams (Android: native ChannelClient; iOS: message
+  /// framing — needs a reachable counterpart in both cases).
+  final bool stream;
+
+  final WearerCompanionLaunch companionLaunch;
+
+  /// `updateComplication` pushes (iOS only).
+  final bool complicationPush;
+
+  /// `requestSurfaceUpdate` (Wear OS only).
+  final bool surfaceUpdate;
+
+  /// Delivery while the app is killed.
+  final bool backgroundWake;
+
+  /// Safe upper bound for one sendMessage/sendRequest payload.
+  /// `transferData` is not limited (large payloads route through a file).
+  final int maxMessageBytes;
+
+  @override
+  String toString() =>
+      'WearerCapabilities(stream: $stream, launch: ${companionLaunch.name}, '
+      'maxMessageBytes: $maxMessageBytes)';
+}
+
 /// Error codes surfaced by the native side.
 enum WearerErrorCode {
   /// The platform forbids the operation (e.g. launching a watchOS app

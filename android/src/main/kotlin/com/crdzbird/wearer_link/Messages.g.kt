@@ -231,6 +231,22 @@ enum class WearerEventKindDto(val raw: Int) {
   }
 }
 
+/** How (whether) this device can launch the companion app. */
+enum class CompanionLaunchDto(val raw: Int) {
+  /** RemoteActivityHelper: opens the companion in the foreground. */
+  FOREGROUND(0),
+  /** HealthKit workout session only (iOS -> watchOS). */
+  WORKOUT_ONLY(1),
+  /** The OS offers no way to launch the counterpart app. */
+  NONE(2);
+
+  companion object {
+    fun ofRaw(raw: Int): CompanionLaunchDto? {
+      return values().firstOrNull { it.raw == raw }
+    }
+  }
+}
+
 /**
  * Snapshot of the companion relationship.
  *
@@ -349,6 +365,99 @@ data class WearerEventDto (
     return result
   }
 }
+
+/**
+ * What this device/pairing actually supports. Static OS facts plus the
+ * dynamic ones (e.g. HealthKit availability); honest, never aspirational.
+ *
+ * Generated class from Pigeon that represents data sent in messages.
+ */
+data class WearerCapabilitiesDto (
+  val message: Boolean,
+  val request: Boolean,
+  val syncData: Boolean,
+  val transferData: Boolean,
+  val transferFile: Boolean,
+  /**
+   * Bidirectional streams: native ChannelClient streams on Android,
+   * sendMessage-framed emulation on iOS (needs a reachable counterpart).
+   */
+  val stream: Boolean,
+  val companionLaunch: CompanionLaunchDto,
+  /** transferCurrentComplicationUserInfo (iOS only). */
+  val complicationPush: Boolean,
+  /** Tile/complication re-render requests (Wear OS only). */
+  val surfaceUpdate: Boolean,
+  /**
+   * Events delivered while the app is killed (listener service /
+   * WatchConnectivity background launch).
+   */
+  val backgroundWake: Boolean,
+  /**
+   * Safe upper bound for a single sendMessage/sendRequest payload.
+   * transferData has no limit (large payloads route through a file).
+   */
+  val maxMessageBytes: Long
+)
+ {
+  companion object {
+    fun fromList(pigeonVar_list: List<Any?>): WearerCapabilitiesDto {
+      val message = pigeonVar_list[0] as Boolean
+      val request = pigeonVar_list[1] as Boolean
+      val syncData = pigeonVar_list[2] as Boolean
+      val transferData = pigeonVar_list[3] as Boolean
+      val transferFile = pigeonVar_list[4] as Boolean
+      val stream = pigeonVar_list[5] as Boolean
+      val companionLaunch = pigeonVar_list[6] as CompanionLaunchDto
+      val complicationPush = pigeonVar_list[7] as Boolean
+      val surfaceUpdate = pigeonVar_list[8] as Boolean
+      val backgroundWake = pigeonVar_list[9] as Boolean
+      val maxMessageBytes = pigeonVar_list[10] as Long
+      return WearerCapabilitiesDto(message, request, syncData, transferData, transferFile, stream, companionLaunch, complicationPush, surfaceUpdate, backgroundWake, maxMessageBytes)
+    }
+  }
+  fun toList(): List<Any?> {
+    return listOf(
+      message,
+      request,
+      syncData,
+      transferData,
+      transferFile,
+      stream,
+      companionLaunch,
+      complicationPush,
+      surfaceUpdate,
+      backgroundWake,
+      maxMessageBytes,
+    )
+  }
+  override fun equals(other: Any?): Boolean {
+    if (other == null || other.javaClass != javaClass) {
+      return false
+    }
+    if (this === other) {
+      return true
+    }
+    val other = other as WearerCapabilitiesDto
+    return MessagesPigeonUtils.deepEquals(this.message, other.message) && MessagesPigeonUtils.deepEquals(this.request, other.request) && MessagesPigeonUtils.deepEquals(this.syncData, other.syncData) && MessagesPigeonUtils.deepEquals(this.transferData, other.transferData) && MessagesPigeonUtils.deepEquals(this.transferFile, other.transferFile) && MessagesPigeonUtils.deepEquals(this.stream, other.stream) && MessagesPigeonUtils.deepEquals(this.companionLaunch, other.companionLaunch) && MessagesPigeonUtils.deepEquals(this.complicationPush, other.complicationPush) && MessagesPigeonUtils.deepEquals(this.surfaceUpdate, other.surfaceUpdate) && MessagesPigeonUtils.deepEquals(this.backgroundWake, other.backgroundWake) && MessagesPigeonUtils.deepEquals(this.maxMessageBytes, other.maxMessageBytes)
+  }
+
+  override fun hashCode(): Int {
+    var result = javaClass.hashCode()
+    result = 31 * result + MessagesPigeonUtils.deepHash(this.message)
+    result = 31 * result + MessagesPigeonUtils.deepHash(this.request)
+    result = 31 * result + MessagesPigeonUtils.deepHash(this.syncData)
+    result = 31 * result + MessagesPigeonUtils.deepHash(this.transferData)
+    result = 31 * result + MessagesPigeonUtils.deepHash(this.transferFile)
+    result = 31 * result + MessagesPigeonUtils.deepHash(this.stream)
+    result = 31 * result + MessagesPigeonUtils.deepHash(this.companionLaunch)
+    result = 31 * result + MessagesPigeonUtils.deepHash(this.complicationPush)
+    result = 31 * result + MessagesPigeonUtils.deepHash(this.surfaceUpdate)
+    result = 31 * result + MessagesPigeonUtils.deepHash(this.backgroundWake)
+    result = 31 * result + MessagesPigeonUtils.deepHash(this.maxMessageBytes)
+    return result
+  }
+}
 private open class MessagesPigeonCodec : StandardMessageCodec() {
   override fun readValueOfType(type: Byte, buffer: ByteBuffer): Any? {
     return when (type) {
@@ -363,13 +472,23 @@ private open class MessagesPigeonCodec : StandardMessageCodec() {
         }
       }
       131.toByte() -> {
-        return (readValue(buffer) as? List<Any?>)?.let {
-          CompanionStatusDto.fromList(it)
+        return (readValue(buffer) as Long?)?.let {
+          CompanionLaunchDto.ofRaw(it.toInt())
         }
       }
       132.toByte() -> {
         return (readValue(buffer) as? List<Any?>)?.let {
+          CompanionStatusDto.fromList(it)
+        }
+      }
+      133.toByte() -> {
+        return (readValue(buffer) as? List<Any?>)?.let {
           WearerEventDto.fromList(it)
+        }
+      }
+      134.toByte() -> {
+        return (readValue(buffer) as? List<Any?>)?.let {
+          WearerCapabilitiesDto.fromList(it)
         }
       }
       else -> super.readValueOfType(type, buffer)
@@ -385,12 +504,20 @@ private open class MessagesPigeonCodec : StandardMessageCodec() {
         stream.write(130)
         writeValue(stream, value.raw.toLong())
       }
-      is CompanionStatusDto -> {
+      is CompanionLaunchDto -> {
         stream.write(131)
+        writeValue(stream, value.raw.toLong())
+      }
+      is CompanionStatusDto -> {
+        stream.write(132)
         writeValue(stream, value.toList())
       }
       is WearerEventDto -> {
-        stream.write(132)
+        stream.write(133)
+        writeValue(stream, value.toList())
+      }
+      is WearerCapabilitiesDto -> {
+        stream.write(134)
         writeValue(stream, value.toList())
       }
       else -> super.writeValue(stream, value)
@@ -487,6 +614,28 @@ interface WearerLinkHostApi {
    * back to the persistent queue only).
    */
   fun clearBackgroundHandler()
+  /** What this device/pairing actually supports. */
+  fun getCapabilities(): WearerCapabilitiesDto
+  /**
+   * While disabled, nothing is delivered to Dart or the background
+   * isolate — every inbound event diverts to the persistent queue (same
+   * path as a killed app; nothing is lost) and incoming streams are
+   * rejected. Persisted across launches.
+   */
+  fun setEventDeliveryEnabled(enabled: Boolean)
+  fun isEventDeliveryEnabled(): Boolean
+  /**
+   * Open a bidirectional stream to the counterpart; resolves with the
+   * stream id once the counterpart accepted. Requires a reachable node.
+   */
+  fun openStream(path: String, nodeId: String?, callback: (Result<String>) -> Unit)
+  /**
+   * Write bytes to an open stream (chunked internally where the transport
+   * needs it). Fails if the stream is closed.
+   */
+  fun sendStreamData(streamId: String, data: ByteArray, callback: (Result<Unit>) -> Unit)
+  /** Close a stream (both directions). Idempotent. */
+  fun closeStream(streamId: String, callback: (Result<Unit>) -> Unit)
 
   companion object {
     /** The codec used by WearerLinkHostApi. */
@@ -781,6 +930,114 @@ interface WearerLinkHostApi {
           channel.setMessageHandler(null)
         }
       }
+      run {
+        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.wearer_link.WearerLinkHostApi.getCapabilities$separatedMessageChannelSuffix", codec)
+        if (api != null) {
+          channel.setMessageHandler { _, reply ->
+            val wrapped: List<Any?> = try {
+              listOf(api.getCapabilities())
+            } catch (exception: Throwable) {
+              MessagesPigeonUtils.wrapError(exception)
+            }
+            reply.reply(wrapped)
+          }
+        } else {
+          channel.setMessageHandler(null)
+        }
+      }
+      run {
+        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.wearer_link.WearerLinkHostApi.setEventDeliveryEnabled$separatedMessageChannelSuffix", codec)
+        if (api != null) {
+          channel.setMessageHandler { message, reply ->
+            val args = message as List<Any?>
+            val enabledArg = args[0] as Boolean
+            val wrapped: List<Any?> = try {
+              api.setEventDeliveryEnabled(enabledArg)
+              listOf(null)
+            } catch (exception: Throwable) {
+              MessagesPigeonUtils.wrapError(exception)
+            }
+            reply.reply(wrapped)
+          }
+        } else {
+          channel.setMessageHandler(null)
+        }
+      }
+      run {
+        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.wearer_link.WearerLinkHostApi.isEventDeliveryEnabled$separatedMessageChannelSuffix", codec)
+        if (api != null) {
+          channel.setMessageHandler { _, reply ->
+            val wrapped: List<Any?> = try {
+              listOf(api.isEventDeliveryEnabled())
+            } catch (exception: Throwable) {
+              MessagesPigeonUtils.wrapError(exception)
+            }
+            reply.reply(wrapped)
+          }
+        } else {
+          channel.setMessageHandler(null)
+        }
+      }
+      run {
+        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.wearer_link.WearerLinkHostApi.openStream$separatedMessageChannelSuffix", codec)
+        if (api != null) {
+          channel.setMessageHandler { message, reply ->
+            val args = message as List<Any?>
+            val pathArg = args[0] as String
+            val nodeIdArg = args[1] as String?
+            api.openStream(pathArg, nodeIdArg) { result: Result<String> ->
+              val error = result.exceptionOrNull()
+              if (error != null) {
+                reply.reply(MessagesPigeonUtils.wrapError(error))
+              } else {
+                val data = result.getOrNull()
+                reply.reply(MessagesPigeonUtils.wrapResult(data))
+              }
+            }
+          }
+        } else {
+          channel.setMessageHandler(null)
+        }
+      }
+      run {
+        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.wearer_link.WearerLinkHostApi.sendStreamData$separatedMessageChannelSuffix", codec)
+        if (api != null) {
+          channel.setMessageHandler { message, reply ->
+            val args = message as List<Any?>
+            val streamIdArg = args[0] as String
+            val dataArg = args[1] as ByteArray
+            api.sendStreamData(streamIdArg, dataArg) { result: Result<Unit> ->
+              val error = result.exceptionOrNull()
+              if (error != null) {
+                reply.reply(MessagesPigeonUtils.wrapError(error))
+              } else {
+                reply.reply(MessagesPigeonUtils.wrapResult(null))
+              }
+            }
+          }
+        } else {
+          channel.setMessageHandler(null)
+        }
+      }
+      run {
+        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.wearer_link.WearerLinkHostApi.closeStream$separatedMessageChannelSuffix", codec)
+        if (api != null) {
+          channel.setMessageHandler { message, reply ->
+            val args = message as List<Any?>
+            val streamIdArg = args[0] as String
+            api.closeStream(streamIdArg) { result: Result<Unit> ->
+              val error = result.exceptionOrNull()
+              if (error != null) {
+                reply.reply(MessagesPigeonUtils.wrapError(error))
+              } else {
+                reply.reply(MessagesPigeonUtils.wrapResult(null))
+              }
+            }
+          }
+        } else {
+          channel.setMessageHandler(null)
+        }
+      }
     }
   }
 }
@@ -877,6 +1134,62 @@ class WearerLinkFlutterApi(private val binaryMessenger: BinaryMessenger, private
     val channelName = "dev.flutter.pigeon.wearer_link.WearerLinkFlutterApi.onConnectionStateChanged$separatedMessageChannelSuffix"
     val channel = BasicMessageChannel<Any?>(binaryMessenger, channelName, codec)
     channel.send(listOf(statusArg)) {
+      if (it is List<*>) {
+        if (it.size > 1) {
+          callback(Result.failure(FlutterError(it[0] as String, it[1] as String, it[2] as String?)))
+        } else {
+          callback(Result.success(Unit))
+        }
+      } else {
+        callback(Result.failure(MessagesPigeonUtils.createConnectionError(channelName)))
+      } 
+    }
+  }
+  /**
+   * A stream was opened — locally initiated (incoming=false, resolves the
+   * pending openStream) or by the counterpart (incoming=true).
+   */
+  fun onStreamOpened(streamIdArg: String, pathArg: String, sourceNodeIdArg: String, incomingArg: Boolean, callback: (Result<Unit>) -> Unit)
+{
+    val separatedMessageChannelSuffix = if (messageChannelSuffix.isNotEmpty()) ".$messageChannelSuffix" else ""
+    val channelName = "dev.flutter.pigeon.wearer_link.WearerLinkFlutterApi.onStreamOpened$separatedMessageChannelSuffix"
+    val channel = BasicMessageChannel<Any?>(binaryMessenger, channelName, codec)
+    channel.send(listOf(streamIdArg, pathArg, sourceNodeIdArg, incomingArg)) {
+      if (it is List<*>) {
+        if (it.size > 1) {
+          callback(Result.failure(FlutterError(it[0] as String, it[1] as String, it[2] as String?)))
+        } else {
+          callback(Result.success(Unit))
+        }
+      } else {
+        callback(Result.failure(MessagesPigeonUtils.createConnectionError(channelName)))
+      } 
+    }
+  }
+  fun onStreamData(streamIdArg: String, dataArg: ByteArray, callback: (Result<Unit>) -> Unit)
+{
+    val separatedMessageChannelSuffix = if (messageChannelSuffix.isNotEmpty()) ".$messageChannelSuffix" else ""
+    val channelName = "dev.flutter.pigeon.wearer_link.WearerLinkFlutterApi.onStreamData$separatedMessageChannelSuffix"
+    val channel = BasicMessageChannel<Any?>(binaryMessenger, channelName, codec)
+    channel.send(listOf(streamIdArg, dataArg)) {
+      if (it is List<*>) {
+        if (it.size > 1) {
+          callback(Result.failure(FlutterError(it[0] as String, it[1] as String, it[2] as String?)))
+        } else {
+          callback(Result.success(Unit))
+        }
+      } else {
+        callback(Result.failure(MessagesPigeonUtils.createConnectionError(channelName)))
+      } 
+    }
+  }
+  /** The stream ended; [error] is null for an orderly close. */
+  fun onStreamClosed(streamIdArg: String, errorArg: String?, callback: (Result<Unit>) -> Unit)
+{
+    val separatedMessageChannelSuffix = if (messageChannelSuffix.isNotEmpty()) ".$messageChannelSuffix" else ""
+    val channelName = "dev.flutter.pigeon.wearer_link.WearerLinkFlutterApi.onStreamClosed$separatedMessageChannelSuffix"
+    val channel = BasicMessageChannel<Any?>(binaryMessenger, channelName, codec)
+    channel.send(listOf(streamIdArg, errorArg)) {
       if (it is List<*>) {
         if (it.size > 1) {
           callback(Result.failure(FlutterError(it[0] as String, it[1] as String, it[2] as String?)))

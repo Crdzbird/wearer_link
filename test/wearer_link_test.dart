@@ -96,6 +96,45 @@ class _FakeHost extends WearerLinkHostApi {
 
   @override
   Future<void> clearBackgroundHandler() async => backgroundHandles = null;
+
+  bool deliveryEnabled = true;
+
+  @override
+  Future<WearerCapabilitiesDto> getCapabilities() async =>
+      WearerCapabilitiesDto(
+        message: true,
+        request: true,
+        syncData: true,
+        transferData: true,
+        transferFile: true,
+        stream: true,
+        companionLaunch: CompanionLaunchDto.workoutOnly,
+        complicationPush: true,
+        surfaceUpdate: false,
+        backgroundWake: true,
+        maxMessageBytes: 57344,
+      );
+
+  @override
+  Future<void> setEventDeliveryEnabled(bool enabled) async =>
+      deliveryEnabled = enabled;
+
+  @override
+  Future<bool> isEventDeliveryEnabled() async => deliveryEnabled;
+
+  final streamSends = <(String, Uint8List)>[];
+  final closedStreams = <String>[];
+
+  @override
+  Future<String> openStream(String path, String? nodeId) async => 'stream-1';
+
+  @override
+  Future<void> sendStreamData(String streamId, Uint8List data) async =>
+      streamSends.add((streamId, data));
+
+  @override
+  Future<void> closeStream(String streamId) async =>
+      closedStreams.add(streamId);
 }
 
 WearerEventDto _event(
@@ -256,6 +295,76 @@ void main() {
     link.messages.listen(messages.add);
     await pumpEventQueue();
     expect(messages, hasLength(1));
+  });
+
+  test('capabilities map to the typed model', () async {
+    final caps = await WearerLink.forTest(_FakeHost()).getCapabilities();
+    expect(caps.stream, isTrue);
+    expect(caps.companionLaunch, WearerCompanionLaunch.workoutOnly);
+    expect(caps.surfaceUpdate, isFalse);
+    expect(caps.maxMessageBytes, 57344);
+  });
+
+  test('re-enabling delivery replays what queued up while paused', () async {
+    final host = _FakeHost();
+    final link = WearerLink.forTest(host);
+    link.messages.listen((_) {});
+    await pumpEventQueue();
+    expect(host.drainCalls, 1);
+
+    await link.setEventDeliveryEnabled(false);
+    expect(host.deliveryEnabled, isFalse);
+    host.pending = [_event('paused-1', WearerEventKindDto.message)];
+
+    final received = <WearerEvent>[];
+    link.messages.listen(received.add);
+    await link.setEventDeliveryEnabled(true);
+    await pumpEventQueue();
+    expect(host.drainCalls, 2);
+    expect(received.single.id, 'paused-1');
+  });
+
+  test('openStream registers and sends through the host', () async {
+    final host = _FakeHost();
+    final link = WearerLink.forTest(host);
+    final stream = await link.openStream('/live');
+    expect(stream.id, 'stream-1');
+    expect(stream.isClosed, isFalse);
+
+    await stream.send(Uint8List.fromList([1]));
+    expect(host.streamSends.single.$1, 'stream-1');
+
+    await stream.close();
+    expect(host.closedStreams, ['stream-1']);
+  });
+
+  test('WearerStream delivers data in order and finishes done', () async {
+    final host = _FakeHost();
+    final link = WearerLink.forTest(host);
+    final stream = await link.openStream('/live');
+
+    final chunks = <List<int>>[];
+    stream.data.listen(chunks.add);
+    stream
+      ..addData(Uint8List.fromList([1]))
+      ..addData(Uint8List.fromList([2]))
+      ..markClosed(null);
+    await pumpEventQueue();
+
+    expect(chunks, [
+      [1],
+      [2],
+    ]);
+    expect(stream.isClosed, isTrue);
+    await stream.done; // completes without error on orderly close
+    expect(() => stream.send(Uint8List(0)), throwsStateError);
+  });
+
+  test('abnormal stream close surfaces the error on done', () async {
+    final link = WearerLink.forTest(_FakeHost());
+    final stream = await link.openStream('/live');
+    stream.markClosed('peer vanished');
+    await expectLater(stream.done, throwsStateError);
   });
 
   test('updateComplication maps unsupported to typed exception', () async {

@@ -18,6 +18,23 @@ Working prototype.
 * watchOS: `WearerLinkWatch` Swift package for native watch apps
   (activate/send/sync/transfer/wake, startup event buffering).
 
+## 0.4.0
+
+* Bidirectional streaming: `openStream` / `incomingStreams` /
+  `WearerStream` (Android: real ChannelClient socket streams; iOS/watchOS:
+  chunked frames over interactive messages). Verified live on the simulator
+  pair: open -> chunks echoed in order -> orderly close.
+* `transferData` is size-unlimited: payloads over the platform message cap
+  transparently travel as a file and still arrive as a plain data event
+  (Android verified route; iOS sender verified — simulator pairs cannot
+  deliver transferFile, a known simulator gap).
+* `getCapabilities()`: typed, honest feature report (message/request/sync/
+  transfer/file/stream, companionLaunch, complicationPush, surfaceUpdate,
+  backgroundWake, maxMessageBytes).
+* `setEventDeliveryEnabled(bool)`: lossless pause — inbound events divert
+  to the persistent queue (same path as a killed app), incoming streams
+  and requests are refused; re-enabling replays the backlog. Persisted.
+
 ## 0.3.0
 
 * Example gained a `RunnerWatch` watchOS target (SwiftUI + WearerLinkWatch).

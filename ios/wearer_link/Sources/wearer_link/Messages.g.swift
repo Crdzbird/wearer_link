@@ -202,6 +202,16 @@ enum WearerEventKindDto: Int {
   case file = 2
 }
 
+/// How (whether) this device can launch the companion app.
+enum CompanionLaunchDto: Int {
+  /// RemoteActivityHelper: opens the companion in the foreground.
+  case foreground = 0
+  /// HealthKit workout session only (iOS -> watchOS).
+  case workoutOnly = 1
+  /// The OS offers no way to launch the counterpart app.
+  case none = 2
+}
+
 /// Snapshot of the companion relationship.
 ///
 /// Generated class from Pigeon that represents data sent in messages.
@@ -315,6 +325,98 @@ struct WearerEventDto: Hashable {
   }
 }
 
+/// What this device/pairing actually supports. Static OS facts plus the
+/// dynamic ones (e.g. HealthKit availability); honest, never aspirational.
+///
+/// Generated class from Pigeon that represents data sent in messages.
+struct WearerCapabilitiesDto: Hashable {
+  var message: Bool
+  var request: Bool
+  var syncData: Bool
+  var transferData: Bool
+  var transferFile: Bool
+  /// Bidirectional streams: native ChannelClient streams on Android,
+  /// sendMessage-framed emulation on iOS (needs a reachable counterpart).
+  var stream: Bool
+  var companionLaunch: CompanionLaunchDto
+  /// transferCurrentComplicationUserInfo (iOS only).
+  var complicationPush: Bool
+  /// Tile/complication re-render requests (Wear OS only).
+  var surfaceUpdate: Bool
+  /// Events delivered while the app is killed (listener service /
+  /// WatchConnectivity background launch).
+  var backgroundWake: Bool
+  /// Safe upper bound for a single sendMessage/sendRequest payload.
+  /// transferData has no limit (large payloads route through a file).
+  var maxMessageBytes: Int64
+
+
+  // swift-format-ignore: AlwaysUseLowerCamelCase
+  static func fromList(_ pigeonVar_list: [Any?]) -> WearerCapabilitiesDto? {
+    let message = pigeonVar_list[0] as! Bool
+    let request = pigeonVar_list[1] as! Bool
+    let syncData = pigeonVar_list[2] as! Bool
+    let transferData = pigeonVar_list[3] as! Bool
+    let transferFile = pigeonVar_list[4] as! Bool
+    let stream = pigeonVar_list[5] as! Bool
+    let companionLaunch = pigeonVar_list[6] as! CompanionLaunchDto
+    let complicationPush = pigeonVar_list[7] as! Bool
+    let surfaceUpdate = pigeonVar_list[8] as! Bool
+    let backgroundWake = pigeonVar_list[9] as! Bool
+    let maxMessageBytes = pigeonVar_list[10] as! Int64
+
+    return WearerCapabilitiesDto(
+      message: message,
+      request: request,
+      syncData: syncData,
+      transferData: transferData,
+      transferFile: transferFile,
+      stream: stream,
+      companionLaunch: companionLaunch,
+      complicationPush: complicationPush,
+      surfaceUpdate: surfaceUpdate,
+      backgroundWake: backgroundWake,
+      maxMessageBytes: maxMessageBytes
+    )
+  }
+  func toList() -> [Any?] {
+    return [
+      message,
+      request,
+      syncData,
+      transferData,
+      transferFile,
+      stream,
+      companionLaunch,
+      complicationPush,
+      surfaceUpdate,
+      backgroundWake,
+      maxMessageBytes,
+    ]
+  }
+  static func == (lhs: WearerCapabilitiesDto, rhs: WearerCapabilitiesDto) -> Bool {
+    if Swift.type(of: lhs) != Swift.type(of: rhs) {
+      return false
+    }
+    return deepEqualsMessages(lhs.message, rhs.message) && deepEqualsMessages(lhs.request, rhs.request) && deepEqualsMessages(lhs.syncData, rhs.syncData) && deepEqualsMessages(lhs.transferData, rhs.transferData) && deepEqualsMessages(lhs.transferFile, rhs.transferFile) && deepEqualsMessages(lhs.stream, rhs.stream) && deepEqualsMessages(lhs.companionLaunch, rhs.companionLaunch) && deepEqualsMessages(lhs.complicationPush, rhs.complicationPush) && deepEqualsMessages(lhs.surfaceUpdate, rhs.surfaceUpdate) && deepEqualsMessages(lhs.backgroundWake, rhs.backgroundWake) && deepEqualsMessages(lhs.maxMessageBytes, rhs.maxMessageBytes)
+  }
+
+  func hash(into hasher: inout Hasher) {
+    hasher.combine("WearerCapabilitiesDto")
+    deepHashMessages(value: message, hasher: &hasher)
+    deepHashMessages(value: request, hasher: &hasher)
+    deepHashMessages(value: syncData, hasher: &hasher)
+    deepHashMessages(value: transferData, hasher: &hasher)
+    deepHashMessages(value: transferFile, hasher: &hasher)
+    deepHashMessages(value: stream, hasher: &hasher)
+    deepHashMessages(value: companionLaunch, hasher: &hasher)
+    deepHashMessages(value: complicationPush, hasher: &hasher)
+    deepHashMessages(value: surfaceUpdate, hasher: &hasher)
+    deepHashMessages(value: backgroundWake, hasher: &hasher)
+    deepHashMessages(value: maxMessageBytes, hasher: &hasher)
+  }
+}
+
 private class MessagesPigeonCodecReader: FlutterStandardReader {
   override func readValue(ofType type: UInt8) -> Any? {
     switch type {
@@ -331,9 +433,17 @@ private class MessagesPigeonCodecReader: FlutterStandardReader {
       }
       return nil
     case 131:
-      return CompanionStatusDto.fromList(self.readValue() as! [Any?])
+      let enumResultAsInt: Int? = nilOrValue(self.readValue() as! Int?)
+      if let enumResultAsInt = enumResultAsInt {
+        return CompanionLaunchDto(rawValue: enumResultAsInt)
+      }
+      return nil
     case 132:
+      return CompanionStatusDto.fromList(self.readValue() as! [Any?])
+    case 133:
       return WearerEventDto.fromList(self.readValue() as! [Any?])
+    case 134:
+      return WearerCapabilitiesDto.fromList(self.readValue() as! [Any?])
     default:
       return super.readValue(ofType: type)
     }
@@ -348,11 +458,17 @@ private class MessagesPigeonCodecWriter: FlutterStandardWriter {
     } else if let value = value as? WearerEventKindDto {
       super.writeByte(130)
       super.writeValue(value.rawValue)
-    } else if let value = value as? CompanionStatusDto {
+    } else if let value = value as? CompanionLaunchDto {
       super.writeByte(131)
+      super.writeValue(value.rawValue)
+    } else if let value = value as? CompanionStatusDto {
+      super.writeByte(132)
       super.writeValue(value.toList())
     } else if let value = value as? WearerEventDto {
-      super.writeByte(132)
+      super.writeByte(133)
+      super.writeValue(value.toList())
+    } else if let value = value as? WearerCapabilitiesDto {
+      super.writeByte(134)
       super.writeValue(value.toList())
     } else {
       super.writeValue(value)
@@ -435,6 +551,22 @@ protocol WearerLinkHostApi {
   /// Stop launching the background isolate for dead-app events (they fall
   /// back to the persistent queue only).
   func clearBackgroundHandler() throws
+  /// What this device/pairing actually supports.
+  func getCapabilities() throws -> WearerCapabilitiesDto
+  /// While disabled, nothing is delivered to Dart or the background
+  /// isolate — every inbound event diverts to the persistent queue (same
+  /// path as a killed app; nothing is lost) and incoming streams are
+  /// rejected. Persisted across launches.
+  func setEventDeliveryEnabled(enabled: Bool) throws
+  func isEventDeliveryEnabled() throws -> Bool
+  /// Open a bidirectional stream to the counterpart; resolves with the
+  /// stream id once the counterpart accepted. Requires a reachable node.
+  func openStream(path: String, nodeId: String?, completion: @escaping (Result<String, Error>) -> Void)
+  /// Write bytes to an open stream (chunked internally where the transport
+  /// needs it). Fails if the stream is closed.
+  func sendStreamData(streamId: String, data: FlutterStandardTypedData, completion: @escaping (Result<Void, Error>) -> Void)
+  /// Close a stream (both directions). Idempotent.
+  func closeStream(streamId: String, completion: @escaping (Result<Void, Error>) -> Void)
 }
 
 /// Generated setup class from Pigeon to handle messages through the `binaryMessenger`.
@@ -732,6 +864,110 @@ class WearerLinkHostApiSetup {
     } else {
       clearBackgroundHandlerChannel.setMessageHandler(nil)
     }
+    /// What this device/pairing actually supports.
+    let getCapabilitiesChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.wearer_link.WearerLinkHostApi.getCapabilities\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+    if let api = api {
+      getCapabilitiesChannel.setMessageHandler { _, reply in
+        do {
+          let result = try api.getCapabilities()
+          reply(wrapResult(result))
+        } catch {
+          reply(wrapError(error))
+        }
+      }
+    } else {
+      getCapabilitiesChannel.setMessageHandler(nil)
+    }
+    /// While disabled, nothing is delivered to Dart or the background
+    /// isolate — every inbound event diverts to the persistent queue (same
+    /// path as a killed app; nothing is lost) and incoming streams are
+    /// rejected. Persisted across launches.
+    let setEventDeliveryEnabledChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.wearer_link.WearerLinkHostApi.setEventDeliveryEnabled\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+    if let api = api {
+      setEventDeliveryEnabledChannel.setMessageHandler { message, reply in
+        let args = message as! [Any?]
+        let enabledArg = args[0] as! Bool
+        do {
+          try api.setEventDeliveryEnabled(enabled: enabledArg)
+          reply(wrapResult(nil))
+        } catch {
+          reply(wrapError(error))
+        }
+      }
+    } else {
+      setEventDeliveryEnabledChannel.setMessageHandler(nil)
+    }
+    let isEventDeliveryEnabledChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.wearer_link.WearerLinkHostApi.isEventDeliveryEnabled\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+    if let api = api {
+      isEventDeliveryEnabledChannel.setMessageHandler { _, reply in
+        do {
+          let result = try api.isEventDeliveryEnabled()
+          reply(wrapResult(result))
+        } catch {
+          reply(wrapError(error))
+        }
+      }
+    } else {
+      isEventDeliveryEnabledChannel.setMessageHandler(nil)
+    }
+    /// Open a bidirectional stream to the counterpart; resolves with the
+    /// stream id once the counterpart accepted. Requires a reachable node.
+    let openStreamChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.wearer_link.WearerLinkHostApi.openStream\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+    if let api = api {
+      openStreamChannel.setMessageHandler { message, reply in
+        let args = message as! [Any?]
+        let pathArg = args[0] as! String
+        let nodeIdArg: String? = nilOrValue(args[1])
+        api.openStream(path: pathArg, nodeId: nodeIdArg) { result in
+          switch result {
+          case .success(let res):
+            reply(wrapResult(res))
+          case .failure(let error):
+            reply(wrapError(error))
+          }
+        }
+      }
+    } else {
+      openStreamChannel.setMessageHandler(nil)
+    }
+    /// Write bytes to an open stream (chunked internally where the transport
+    /// needs it). Fails if the stream is closed.
+    let sendStreamDataChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.wearer_link.WearerLinkHostApi.sendStreamData\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+    if let api = api {
+      sendStreamDataChannel.setMessageHandler { message, reply in
+        let args = message as! [Any?]
+        let streamIdArg = args[0] as! String
+        let dataArg = args[1] as! FlutterStandardTypedData
+        api.sendStreamData(streamId: streamIdArg, data: dataArg) { result in
+          switch result {
+          case .success:
+            reply(wrapResult(nil))
+          case .failure(let error):
+            reply(wrapError(error))
+          }
+        }
+      }
+    } else {
+      sendStreamDataChannel.setMessageHandler(nil)
+    }
+    /// Close a stream (both directions). Idempotent.
+    let closeStreamChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.wearer_link.WearerLinkHostApi.closeStream\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+    if let api = api {
+      closeStreamChannel.setMessageHandler { message, reply in
+        let args = message as! [Any?]
+        let streamIdArg = args[0] as! String
+        api.closeStream(streamId: streamIdArg) { result in
+          switch result {
+          case .success:
+            reply(wrapResult(nil))
+          case .failure(let error):
+            reply(wrapError(error))
+          }
+        }
+      }
+    } else {
+      closeStreamChannel.setMessageHandler(nil)
+    }
   }
 }
 /// Native -> Dart.
@@ -745,6 +981,12 @@ protocol WearerLinkFlutterApiProtocol {
   func onDataChanged(event eventArg: WearerEventDto, completion: @escaping (Result<Void, PigeonError>) -> Void)
   func onFileReceived(event eventArg: WearerEventDto, completion: @escaping (Result<Void, PigeonError>) -> Void)
   func onConnectionStateChanged(status statusArg: CompanionStatusDto, completion: @escaping (Result<Void, PigeonError>) -> Void)
+  /// A stream was opened — locally initiated (incoming=false, resolves the
+  /// pending openStream) or by the counterpart (incoming=true).
+  func onStreamOpened(streamId streamIdArg: String, path pathArg: String, sourceNodeId sourceNodeIdArg: String, incoming incomingArg: Bool, completion: @escaping (Result<Void, PigeonError>) -> Void)
+  func onStreamData(streamId streamIdArg: String, data dataArg: FlutterStandardTypedData, completion: @escaping (Result<Void, PigeonError>) -> Void)
+  /// The stream ended; [error] is null for an orderly close.
+  func onStreamClosed(streamId streamIdArg: String, error errorArg: String?, completion: @escaping (Result<Void, PigeonError>) -> Void)
 }
 class WearerLinkFlutterApi: WearerLinkFlutterApiProtocol {
   private let binaryMessenger: FlutterBinaryMessenger
@@ -837,6 +1079,63 @@ class WearerLinkFlutterApi: WearerLinkFlutterApiProtocol {
     let channelName: String = "dev.flutter.pigeon.wearer_link.WearerLinkFlutterApi.onConnectionStateChanged\(messageChannelSuffix)"
     let channel = FlutterBasicMessageChannel(name: channelName, binaryMessenger: binaryMessenger, codec: codec)
     channel.sendMessage([statusArg] as [Any?]) { response in
+      guard let listResponse = response as? [Any?] else {
+        completion(.failure(createConnectionError(withChannelName: channelName)))
+        return
+      }
+      if listResponse.count > 1 {
+        let code: String = listResponse[0] as! String
+        let message: String? = nilOrValue(listResponse[1])
+        let details: String? = nilOrValue(listResponse[2])
+        completion(.failure(PigeonError(code: code, message: message, details: details)))
+      } else {
+        completion(.success(()))
+      }
+    }
+  }
+  /// A stream was opened — locally initiated (incoming=false, resolves the
+  /// pending openStream) or by the counterpart (incoming=true).
+  func onStreamOpened(streamId streamIdArg: String, path pathArg: String, sourceNodeId sourceNodeIdArg: String, incoming incomingArg: Bool, completion: @escaping (Result<Void, PigeonError>) -> Void) {
+    let channelName: String = "dev.flutter.pigeon.wearer_link.WearerLinkFlutterApi.onStreamOpened\(messageChannelSuffix)"
+    let channel = FlutterBasicMessageChannel(name: channelName, binaryMessenger: binaryMessenger, codec: codec)
+    channel.sendMessage([streamIdArg, pathArg, sourceNodeIdArg, incomingArg] as [Any?]) { response in
+      guard let listResponse = response as? [Any?] else {
+        completion(.failure(createConnectionError(withChannelName: channelName)))
+        return
+      }
+      if listResponse.count > 1 {
+        let code: String = listResponse[0] as! String
+        let message: String? = nilOrValue(listResponse[1])
+        let details: String? = nilOrValue(listResponse[2])
+        completion(.failure(PigeonError(code: code, message: message, details: details)))
+      } else {
+        completion(.success(()))
+      }
+    }
+  }
+  func onStreamData(streamId streamIdArg: String, data dataArg: FlutterStandardTypedData, completion: @escaping (Result<Void, PigeonError>) -> Void) {
+    let channelName: String = "dev.flutter.pigeon.wearer_link.WearerLinkFlutterApi.onStreamData\(messageChannelSuffix)"
+    let channel = FlutterBasicMessageChannel(name: channelName, binaryMessenger: binaryMessenger, codec: codec)
+    channel.sendMessage([streamIdArg, dataArg] as [Any?]) { response in
+      guard let listResponse = response as? [Any?] else {
+        completion(.failure(createConnectionError(withChannelName: channelName)))
+        return
+      }
+      if listResponse.count > 1 {
+        let code: String = listResponse[0] as! String
+        let message: String? = nilOrValue(listResponse[1])
+        let details: String? = nilOrValue(listResponse[2])
+        completion(.failure(PigeonError(code: code, message: message, details: details)))
+      } else {
+        completion(.success(()))
+      }
+    }
+  }
+  /// The stream ended; [error] is null for an orderly close.
+  func onStreamClosed(streamId streamIdArg: String, error errorArg: String?, completion: @escaping (Result<Void, PigeonError>) -> Void) {
+    let channelName: String = "dev.flutter.pigeon.wearer_link.WearerLinkFlutterApi.onStreamClosed\(messageChannelSuffix)"
+    let channel = FlutterBasicMessageChannel(name: channelName, binaryMessenger: binaryMessenger, codec: codec)
+    channel.sendMessage([streamIdArg, errorArg] as [Any?]) { response in
       guard let listResponse = response as? [Any?] else {
         completion(.failure(createConnectionError(withChannelName: channelName)))
         return

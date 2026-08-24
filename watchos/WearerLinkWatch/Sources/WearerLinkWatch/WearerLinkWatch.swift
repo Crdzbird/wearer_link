@@ -22,6 +22,33 @@ import WatchConnectivity
 ///   var body: some Scene { WindowGroup { ContentView() } }
 /// }
 /// ```
+/// A live bidirectional byte stream to the phone, framed over interactive
+/// messages (needs the phone reachable for its whole lifetime).
+public final class WatchStream {
+  public let id: String
+  public let path: String
+
+  /// Bytes from the phone, on the main queue.
+  public var onData: ((Data) -> Void)?
+
+  /// Stream ended; nil reason means an orderly close. Main queue.
+  public var onClose: ((String?) -> Void)?
+
+  init(id: String, path: String) {
+    self.id = id
+    self.path = path
+  }
+
+  /// Send bytes (chunked internally). Errors tear the stream down.
+  public func send(_ data: Data) {
+    WearerLinkWatch.shared.streamSend(id: id, data: data)
+  }
+
+  public func close() {
+    WearerLinkWatch.shared.streamClose(id: id, notifyPeer: true, error: nil)
+  }
+}
+
 public final class WearerLinkWatch: NSObject {
 
   public static let shared = WearerLinkWatch()
@@ -53,6 +80,13 @@ public final class WearerLinkWatch: NSObject {
   /// unset, phone requests fail with a noHandler error (never queued — the
   /// sender is waiting).
   public var onRequest: ((Event, @escaping (Data) -> Void) -> Void)?
+
+  /// Streams the phone opened toward the watch. While unset, opens are
+  /// refused. Main queue.
+  public var onIncomingStream: ((WatchStream) -> Void)?
+
+  // Open streams by id. Main-queue confined.
+  private var streams: [String: WatchStream] = [:]
 
   /// Called on the main queue when reachability to the phone changes.
   public var onReachabilityChange: ((Bool) -> Void)?
@@ -175,6 +209,14 @@ public final class WearerLinkWatch: NSObject {
   /// Queued FIFO transfer; every call is delivered once the phone connects,
   /// launching the phone app in the background if needed.
   public func transferData(path: String, payload: Data) {
+    if payload.count > Envelope.maxMessageBytes {
+      // Too big for one transfer: travel as a file, arrive as a data event.
+      let temp = FileManager.default.temporaryDirectory
+        .appendingPathComponent("wearer_blob_\(UUID().uuidString)")
+      guard (try? payload.write(to: temp)) != nil else { return }
+      transferFile(path: Envelope.blobMarker + path, fileURL: temp)
+      return
+    }
     WCSession.default.transferUserInfo(
       envelope(path: path, payload: payload, kind: Envelope.kindData))
   }
@@ -186,6 +228,142 @@ public final class WearerLinkWatch: NSObject {
     var metadata = envelope(path: path, payload: Data(), kind: Envelope.kindFile)
     metadata.removeValue(forKey: Envelope.payload)
     WCSession.default.transferFile(fileURL, metadata: metadata)
+  }
+
+  /// Open a bidirectional stream to the phone. The phone must be reachable
+  /// and have a listener on `WearerLink.instance.incomingStreams`.
+  public func openStream(
+    path: String,
+    completion: @escaping (Result<WatchStream, WearerError>) -> Void
+  ) {
+    let session = WCSession.default
+    guard session.activationState == .activated, session.isReachable else {
+      completion(.failure(.phoneUnreachable))
+      return
+    }
+    let id = UUID().uuidString
+    session.sendMessage(
+      Frame.open(id: id, path: path),
+      replyHandler: { reply in
+        DispatchQueue.main.async {
+          if reply[Frame.ok] != nil {
+            let stream = WatchStream(id: id, path: path)
+            self.streams[id] = stream
+            completion(.success(stream))
+          } else {
+            let reason = reply[Frame.err] as? String ?? "rejected"
+            completion(.failure(.sendFailed(NSError(
+              domain: "wearer_link", code: 2,
+              userInfo: [NSLocalizedDescriptionKey: reason]))))
+          }
+        }
+      },
+      errorHandler: { error in
+        DispatchQueue.main.async { completion(.failure(.sendFailed(error))) }
+      })
+  }
+
+  fileprivate func streamSend(id: String, data: Data) {
+    guard streams[id] != nil else { return }
+    var offset = 0
+    while offset < data.count {
+      let end = min(offset + Frame.chunkBytes, data.count)
+      let chunk = data.subdata(in: offset..<end)
+      WCSession.default.sendMessage(
+        Frame.data(id: id, chunk: chunk),
+        replyHandler: nil,
+        errorHandler: { [weak self] error in
+          DispatchQueue.main.async {
+            self?.streamClose(id: id, notifyPeer: false, error: "\(error)")
+          }
+        })
+      offset = end
+    }
+  }
+
+  fileprivate func streamClose(id: String, notifyPeer: Bool, error: String?) {
+    guard let stream = streams.removeValue(forKey: id) else { return }
+    if notifyPeer && WCSession.default.isReachable {
+      WCSession.default.sendMessage(
+        Frame.close(id: id), replyHandler: nil, errorHandler: { _ in })
+    }
+    stream.onClose?(error)
+  }
+
+  private func handleStreamOpen(
+    _ message: [String: Any],
+    replyHandler: @escaping ([String: Any]) -> Void
+  ) {
+    guard
+      let id = message[Frame.sid] as? String,
+      let path = message[Frame.path] as? String
+    else {
+      replyHandler([Frame.err: "malformed"])
+      return
+    }
+    DispatchQueue.main.async {
+      guard let accept = self.onIncomingStream else {
+        replyHandler([Frame.err: "noListener"])
+        return
+      }
+      let stream = WatchStream(id: id, path: path)
+      self.streams[id] = stream
+      replyHandler([Frame.ok: 1])
+      accept(stream)
+    }
+  }
+
+  private func handleStreamFrame(_ message: [String: Any]) {
+    guard
+      let id = message[Frame.sid] as? String,
+      let op = message[Frame.op] as? String
+    else { return }
+    DispatchQueue.main.async {
+      switch op {
+      case Frame.opData:
+        if let chunk = message[Frame.chunk] as? Data {
+          self.streams[id]?.onData?(chunk)
+        }
+      case Frame.opClose:
+        self.streamClose(id: id, notifyPeer: false, error: nil)
+      default:
+        break
+      }
+    }
+  }
+
+  /// Stream frame wire format. CONTRACT: mirrored in the plugin's iOS side.
+  private enum Frame {
+    static let chunkBytes = 56 * 1024
+    static let op = "op"
+    static let sid = "sid"
+    static let path = "p"
+    static let chunk = "d"
+    static let ok = "ok"
+    static let err = "err"
+    static let opOpen = "o"
+    static let opData = "d"
+    static let opClose = "c"
+
+    static func base(op operation: String, id: String) -> [String: Any] {
+      ["k": Envelope.kindStream, sid: id, op: operation]
+    }
+
+    static func open(id: String, path streamPath: String) -> [String: Any] {
+      var frame = base(op: opOpen, id: id)
+      frame[path] = streamPath
+      return frame
+    }
+
+    static func data(id: String, chunk bytes: Data) -> [String: Any] {
+      var frame = base(op: opData, id: id)
+      frame[chunk] = bytes
+      return frame
+    }
+
+    static func close(id: String) -> [String: Any] {
+      base(op: opClose, id: id)
+    }
   }
 
   /// Wake the phone app in the background (delivered as a data event on the
@@ -249,9 +427,14 @@ public final class WearerLinkWatch: NSObject {
     static let kindData = 1
     static let kindFile = 2
     static let kindRequest = 3
+    static let kindStream = 4
 
     static let replyPayload = "d"
     static let replyError = "err"
+
+    /// Oversized transferData marker. CONTRACT: mirrored on iOS/Android.
+    static let blobMarker = "/__wlblob"
+    static let maxMessageBytes = 56 * 1024
   }
 }
 
@@ -276,6 +459,10 @@ extension WearerLinkWatch: WCSessionDelegate {
   }
 
   public func session(_ session: WCSession, didReceiveMessage message: [String: Any]) {
+    if (message[Envelope.kind] as? Int) == Envelope.kindStream {
+      handleStreamFrame(message)
+      return
+    }
     handleInbound(message)
   }
 
@@ -284,6 +471,10 @@ extension WearerLinkWatch: WCSessionDelegate {
     didReceiveMessage message: [String: Any],
     replyHandler: @escaping ([String: Any]) -> Void
   ) {
+    if (message[Envelope.kind] as? Int) == Envelope.kindStream {
+      handleStreamOpen(message, replyHandler: replyHandler)
+      return
+    }
     if (message[Envelope.kind] as? Int) == Envelope.kindRequest {
       guard
         let path = message[Envelope.path] as? String,
@@ -349,6 +540,18 @@ extension WearerLinkWatch: WCSessionDelegate {
       try FileManager.default.copyItem(at: file.fileURL, to: dest)
     } catch {
       return // nothing to deliver if the copy failed
+    }
+    if let path = metadata[Envelope.path] as? String,
+      path.hasPrefix(Envelope.blobMarker) {
+      // Oversized transferData that traveled as a file: back into bytes.
+      guard let payload = try? Data(contentsOf: dest) else { return }
+      try? FileManager.default.removeItem(at: dest)
+      var restored = metadata
+      restored[Envelope.path] = String(path.dropFirst(Envelope.blobMarker.count))
+      restored[Envelope.payload] = payload
+      restored[Envelope.kind] = Envelope.kindData
+      handleInbound(restored)
+      return
     }
     handleInbound(metadata, fileURL: dest)
   }

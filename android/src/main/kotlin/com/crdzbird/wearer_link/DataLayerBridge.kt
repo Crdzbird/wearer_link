@@ -156,6 +156,18 @@ class DataLayerBridge(private val context: Context) {
     }
   }
 
+  /** One node for point-to-point links: [nodeId] or the sole capable node. */
+  suspend fun singleTargetNode(nodeId: String?): String {
+    val nodes = targetNodes(nodeId)
+    return nodes.singleOrNull()?.id
+      ?: throw FlutterError(
+        "sendFailed",
+        "Need exactly one target; ${nodes.size} capable nodes are reachable " +
+          "— pass nodeId.",
+        null,
+      )
+  }
+
   private suspend fun targetNodes(nodeId: String?): Set<Node> {
     val nodes = capableNodes()
     if (nodes.isEmpty()) {
@@ -178,8 +190,38 @@ class DataLayerBridge(private val context: Context) {
   }
 
   suspend fun transferData(userPath: String, payload: ByteArray) {
+    if (payload.size > WireProtocol.MAX_DATA_ITEM_BYTES) {
+      // Too big for a DataItem: travel as a file, arrive as a data event.
+      // Trade-off (documented): this route needs a reachable node.
+      val blob = File.createTempFile("wearer_blob", null, context.cacheDir)
+      try {
+        blob.writeBytes(payload)
+        transferFile(WireProtocol.BLOB_MARKER + userPath, blob.absolutePath, nodeId = null)
+      } finally {
+        blob.delete()
+      }
+      return
+    }
     val id = UUID.randomUUID().toString()
     putDataItem(WireProtocol.queuePath(userPath, id), payload, id = id, urgent = true)
+  }
+
+  fun capabilities(): WearerCapabilitiesDto {
+    val supported = isSupported()
+    return WearerCapabilitiesDto(
+      message = supported,
+      request = supported,
+      syncData = supported,
+      transferData = supported,
+      transferFile = supported,
+      stream = supported,
+      companionLaunch =
+        if (supported) CompanionLaunchDto.FOREGROUND else CompanionLaunchDto.NONE,
+      complicationPush = false, // watchOS-only primitive
+      surfaceUpdate = true, // tiles/complications on Wear OS
+      backgroundWake = supported,
+      maxMessageBytes = WireProtocol.MAX_MESSAGE_BYTES.toLong(),
+    )
   }
 
   private suspend fun putDataItem(

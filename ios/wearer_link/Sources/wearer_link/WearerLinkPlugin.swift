@@ -23,6 +23,10 @@ public class WearerLinkPlugin: NSObject, FlutterPlugin {
     bridge.liveDispatcher = nil
     bridge.statusListener = nil
     bridge.requestHandler = nil
+    StreamRegistry.shared.onOpened = nil
+    StreamRegistry.shared.onData = nil
+    StreamRegistry.shared.onClosed = nil
+    StreamRegistry.shared.closeAll()
     WearerLinkHostApiSetup.setUp(binaryMessenger: registrar.messenger(), api: nil)
     flutterApi = nil
   }
@@ -64,6 +68,17 @@ public class WearerLinkPlugin: NSObject, FlutterPlugin {
     }
     bridge.statusListener = { [weak self] status in
       self?.flutterApi?.onConnectionStateChanged(status: status) { _ in }
+    }
+    StreamRegistry.shared.onOpened = { [weak self] id, path, node, incoming in
+      self?.flutterApi?.onStreamOpened(
+        streamId: id, path: path, sourceNodeId: node, incoming: incoming) { _ in }
+    }
+    StreamRegistry.shared.onData = { [weak self] id, data in
+      self?.flutterApi?.onStreamData(
+        streamId: id, data: FlutterStandardTypedData(bytes: data)) { _ in }
+    }
+    StreamRegistry.shared.onClosed = { [weak self] id, error in
+      self?.flutterApi?.onStreamClosed(streamId: id, error: error) { _ in }
     }
     bridge.requestHandler = { [weak self] event, completion in
       guard let api = self?.flutterApi else {
@@ -153,7 +168,52 @@ extension WearerLinkPlugin: WearerLinkHostApi {
     payload: FlutterStandardTypedData,
     completion: @escaping (Result<Void, Error>) -> Void
   ) {
-    bridge.transferData(path: path, payload: payload.data)
+    do {
+      try bridge.transferData(path: path, payload: payload.data)
+      completion(.success(()))
+    } catch {
+      completion(.failure(PigeonError(code: "sendFailed", message: "\(error)", details: nil)))
+    }
+  }
+
+  func getCapabilities() throws -> WearerCapabilitiesDto {
+    bridge.capabilities()
+  }
+
+  func setEventDeliveryEnabled(enabled: Bool) throws {
+    bridge.setDeliveryEnabled(enabled)
+  }
+
+  func isEventDeliveryEnabled() throws -> Bool {
+    bridge.deliveryEnabled
+  }
+
+  func openStream(
+    path: String,
+    nodeId: String?,
+    completion: @escaping (Result<String, Error>) -> Void
+  ) {
+    guard bridge.deliveryEnabled else {
+      completion(.failure(PigeonError(
+        code: "unsupported", message: "Event delivery is disabled.", details: nil)))
+      return
+    }
+    StreamRegistry.shared.openStream(path: path, completion: completion)
+  }
+
+  func sendStreamData(
+    streamId: String,
+    data: FlutterStandardTypedData,
+    completion: @escaping (Result<Void, Error>) -> Void
+  ) {
+    StreamRegistry.shared.send(id: streamId, data: data.data, completion: completion)
+  }
+
+  func closeStream(
+    streamId: String,
+    completion: @escaping (Result<Void, Error>) -> Void
+  ) {
+    StreamRegistry.shared.close(id: streamId)
     completion(.success(()))
   }
 

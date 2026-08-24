@@ -33,7 +33,10 @@ wearer.dataEvents.listen((e) => print('${e.path}: ${e.payload}'));
 // Send
 await wearer.sendMessage('/ping', bytes);   // interactive, needs reachable counterpart
 await wearer.syncData('/state', bytes);     // latest-per-path, survives disconnects
-await wearer.transferData('/log', bytes);   // queued FIFO, every item delivered
+await wearer.transferData('/log', bytes);   // queued FIFO, any size (big
+                                            // payloads route through a file
+                                            // — that route needs a
+                                            // reachable node on Android)
 
 // Request/response RPC (10s default timeout; counterpart must answer)
 final reply = await wearer.sendRequest('/echo', bytes);
@@ -45,6 +48,21 @@ await wearer.deleteSyncData('/state');              // removes what THIS device 
 
 // Multi-watch (Android): target one node; iOS ignores nodeId (single watch)
 await wearer.sendMessage('/ping', bytes, nodeId: status.nodes.first);
+
+// Bidirectional streaming (Android: ChannelClient; iOS: message framing)
+final stream = await wearer.openStream('/live');
+stream.data.listen(print);                      // bytes from the counterpart
+await stream.send(bytes);                       // any size, chunked for you
+await stream.close();
+wearer.incomingStreams.listen((s) => ...);      // accept counterpart streams
+// native watch: WearerLinkWatch.shared.openStream / onIncomingStream
+
+// Capability introspection — check instead of catching 'unsupported'
+final caps = await wearer.getCapabilities();
+if (caps.stream) ...;                            // + companionLaunch, maxMessageBytes, …
+
+// Pause/resume delivery (lossless: everything queues while disabled)
+await wearer.setEventDeliveryEnabled(false);
 
 // Files (received into the app cache dir; move if you need durability)
 await wearer.transferFile('/photos/1', localFile.path);

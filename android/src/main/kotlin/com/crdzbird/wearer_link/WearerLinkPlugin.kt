@@ -49,6 +49,7 @@ class WearerLinkPlugin : FlutterPlugin, WearerLinkHostApi {
     }
     liveDispatcher = ::dispatchToDart
     liveRequestHandler = ::requestToDart
+    StreamRegistry.listener = streamListener
     claimedLiveDispatch = true
   }
 
@@ -56,6 +57,8 @@ class WearerLinkPlugin : FlutterPlugin, WearerLinkHostApi {
     if (claimedLiveDispatch) {
       liveDispatcher = null
       liveRequestHandler = null
+      StreamRegistry.listener = null
+      StreamRegistry.closeAll(context)
       claimedLiveDispatch = false
     }
     WearerLinkHostApi.setUp(binding.binaryMessenger, null)
@@ -170,6 +173,56 @@ class WearerLinkPlugin : FlutterPlugin, WearerLinkHostApi {
     BackgroundDispatcher.clear(context)
   }
 
+  override fun getCapabilities(): WearerCapabilitiesDto =
+    bridge?.capabilities()
+      ?: throw FlutterError("unknown", "Plugin detached.", null)
+
+  override fun setEventDeliveryEnabled(enabled: Boolean) {
+    DeliveryGate.setEnabled(context, enabled)
+    if (!enabled) StreamRegistry.closeAll(context)
+  }
+
+  override fun isEventDeliveryEnabled(): Boolean = DeliveryGate.isEnabled(context)
+
+  override fun openStream(
+    path: String,
+    nodeId: String?,
+    callback: (Result<String>) -> Unit,
+  ) {
+    launchWith(callback) { activeBridge ->
+      if (!DeliveryGate.isEnabled(context)) {
+        throw FlutterError("unsupported", "Event delivery is disabled.", null)
+      }
+      val node = activeBridge.singleTargetNode(nodeId)
+      StreamRegistry.open(context, path, node)
+    }
+  }
+
+  override fun sendStreamData(
+    streamId: String,
+    data: ByteArray,
+    callback: (Result<Unit>) -> Unit,
+  ) {
+    val activeScope = scope
+      ?: return callback(Result.failure(FlutterError("unknown", "Plugin detached.", null)))
+    activeScope.launch(Dispatchers.IO) {
+      val result = try {
+        StreamRegistry.send(streamId, data)
+        Result.success(Unit)
+      } catch (e: FlutterError) {
+        Result.failure(e)
+      } catch (e: Exception) {
+        Result.failure<Unit>(FlutterError("sendFailed", "$e", null))
+      }
+      mainHandler.post { callback(result) }
+    }
+  }
+
+  override fun closeStream(streamId: String, callback: (Result<Unit>) -> Unit) {
+    StreamRegistry.close(context, streamId)
+    callback(Result.success(Unit))
+  }
+
   override fun drainPendingEvents(callback: (Result<List<WearerEventDto>>) -> Unit) {
     val activeStore = store
       ?: return callback(Result.failure(FlutterError("unknown", "Plugin detached.", null)))
@@ -231,6 +284,20 @@ class WearerLinkPlugin : FlutterPlugin, WearerLinkHostApi {
       WearerEventKindDto.MESSAGE -> api.onMessage(dto, onResult)
       WearerEventKindDto.DATA -> api.onDataChanged(dto, onResult)
       WearerEventKindDto.FILE -> api.onFileReceived(dto, onResult)
+    }
+  }
+
+  private val streamListener = object : StreamRegistry.Listener {
+    override fun onOpened(id: String, path: String, nodeId: String, incoming: Boolean) {
+      flutterApi?.onStreamOpened(id, path, nodeId, incoming) { }
+    }
+
+    override fun onData(id: String, data: ByteArray) {
+      flutterApi?.onStreamData(id, data) { }
+    }
+
+    override fun onClosed(id: String, error: String?) {
+      flutterApi?.onStreamClosed(id, error) { }
     }
   }
 

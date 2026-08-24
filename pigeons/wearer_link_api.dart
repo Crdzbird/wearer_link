@@ -98,6 +98,62 @@ class WearerEventDto {
   String? filePath;
 }
 
+/// How (whether) this device can launch the companion app.
+enum CompanionLaunchDto {
+  /// RemoteActivityHelper: opens the companion in the foreground.
+  foreground,
+
+  /// HealthKit workout session only (iOS -> watchOS).
+  workoutOnly,
+
+  /// The OS offers no way to launch the counterpart app.
+  none,
+}
+
+/// What this device/pairing actually supports. Static OS facts plus the
+/// dynamic ones (e.g. HealthKit availability); honest, never aspirational.
+class WearerCapabilitiesDto {
+  WearerCapabilitiesDto({
+    required this.message,
+    required this.request,
+    required this.syncData,
+    required this.transferData,
+    required this.transferFile,
+    required this.stream,
+    required this.companionLaunch,
+    required this.complicationPush,
+    required this.surfaceUpdate,
+    required this.backgroundWake,
+    required this.maxMessageBytes,
+  });
+
+  bool message;
+  bool request;
+  bool syncData;
+  bool transferData;
+  bool transferFile;
+
+  /// Bidirectional streams: native ChannelClient streams on Android,
+  /// sendMessage-framed emulation on iOS (needs a reachable counterpart).
+  bool stream;
+
+  CompanionLaunchDto companionLaunch;
+
+  /// transferCurrentComplicationUserInfo (iOS only).
+  bool complicationPush;
+
+  /// Tile/complication re-render requests (Wear OS only).
+  bool surfaceUpdate;
+
+  /// Events delivered while the app is killed (listener service /
+  /// WatchConnectivity background launch).
+  bool backgroundWake;
+
+  /// Safe upper bound for a single sendMessage/sendRequest payload.
+  /// transferData has no limit (large payloads route through a file).
+  int maxMessageBytes;
+}
+
 /// Dart -> native.
 @HostApi()
 abstract class WearerLinkHostApi {
@@ -183,6 +239,31 @@ abstract class WearerLinkHostApi {
   /// Stop launching the background isolate for dead-app events (they fall
   /// back to the persistent queue only).
   void clearBackgroundHandler();
+
+  /// What this device/pairing actually supports.
+  WearerCapabilitiesDto getCapabilities();
+
+  /// While disabled, nothing is delivered to Dart or the background
+  /// isolate — every inbound event diverts to the persistent queue (same
+  /// path as a killed app; nothing is lost) and incoming streams are
+  /// rejected. Persisted across launches.
+  void setEventDeliveryEnabled(bool enabled);
+
+  bool isEventDeliveryEnabled();
+
+  /// Open a bidirectional stream to the counterpart; resolves with the
+  /// stream id once the counterpart accepted. Requires a reachable node.
+  @async
+  String openStream(String path, String? nodeId);
+
+  /// Write bytes to an open stream (chunked internally where the transport
+  /// needs it). Fails if the stream is closed.
+  @async
+  void sendStreamData(String streamId, Uint8List data);
+
+  /// Close a stream (both directions). Idempotent.
+  @async
+  void closeStream(String streamId);
 }
 
 /// Native -> Dart.
@@ -200,6 +281,20 @@ abstract class WearerLinkFlutterApi {
   void onFileReceived(WearerEventDto event);
 
   void onConnectionStateChanged(CompanionStatusDto status);
+
+  /// A stream was opened — locally initiated (incoming=false, resolves the
+  /// pending openStream) or by the counterpart (incoming=true).
+  void onStreamOpened(
+    String streamId,
+    String path,
+    String sourceNodeId,
+    bool incoming,
+  );
+
+  void onStreamData(String streamId, Uint8List data);
+
+  /// The stream ended; [error] is null for an orderly close.
+  void onStreamClosed(String streamId, String? error);
 }
 
 /// Dart -> native, background isolate only.

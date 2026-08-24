@@ -79,6 +79,22 @@ class _HomePageState extends State<HomePage> {
     _link
         .registerBackgroundHandler(demoBackgroundHandler)
         .catchError((Object e) => _append('bg register failed: $e'));
+    // Echo every incoming stream back, uppercased.
+    _subscriptions.add(
+      _link.incomingStreams.listen((stream) {
+        _append('stream in ${stream.path}');
+        stream.data.listen(
+          (chunk) {
+            _append('stream← ${_decode(chunk)}');
+            stream.send(
+              Uint8List.fromList(utf8.encode(_decode(chunk).toUpperCase())),
+            );
+          },
+          onError: (Object e) => _append('stream error: $e'),
+          onDone: () => _append('stream in done'),
+        );
+      }),
+    );
     // Answer sendRequest round trips from the counterpart: echo, uppercased.
     _link.setRequestHandler((request) async {
       _append('request ${request.path}: ${_decode(request.payload)}');
@@ -98,7 +114,10 @@ class _HomePageState extends State<HomePage> {
 
   String _decode(List<int> bytes) {
     try {
-      return utf8.decode(bytes);
+      final text = utf8.decode(bytes);
+      return text.length > 60
+          ? '${text.substring(0, 60)}… (${bytes.length}B)'
+          : text;
     } on FormatException {
       return '${bytes.length} bytes';
     }
@@ -198,6 +217,36 @@ class _HomePageState extends State<HomePage> {
                     );
                   }),
                   child: const Text('Read sync'),
+                ),
+                FilledButton.tonal(
+                  onPressed: () => _run('stream', () async {
+                    final stream = await _link.openStream('/live');
+                    _append('stream open ${stream.id.substring(0, 8)}');
+                    stream.data.listen(
+                      (chunk) => _append('stream← ${_decode(chunk)}'),
+                      onError: (Object e) => _append('stream error: $e'),
+                      onDone: () => _append('stream done'),
+                    );
+                    for (var i = 1; i <= 3; i++) {
+                      await stream.send(
+                        Uint8List.fromList(utf8.encode('chunk $i')),
+                      );
+                    }
+                    // Leave time for the echoes, then close tidily.
+                    await Future<void>.delayed(const Duration(seconds: 3));
+                    await stream.close();
+                  }),
+                  child: const Text('Stream'),
+                ),
+                FilledButton.tonal(
+                  onPressed: () => _run('big', () async {
+                    final payload = Uint8List.fromList(
+                      List.generate(150 * 1024, (i) => 0x61 + (i % 26)),
+                    );
+                    await _link.transferData('/big', payload);
+                    _append('big sent ${payload.length}B');
+                  }),
+                  child: const Text('Big transfer'),
                 ),
                 FilledButton.tonal(
                   onPressed: () => _run('file', () async {

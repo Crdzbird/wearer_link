@@ -63,6 +63,18 @@ struct ContentView: View {
         append("\(event.isDataEvent ? "data" : "msg") \(event.path): "
           + String(decoding: event.payload, as: UTF8.self))
       }
+      // Echo phone-initiated streams back, uppercased.
+      WearerLinkWatch.shared.onIncomingStream = { stream in
+        append("stream in \(stream.path)")
+        stream.onData = { chunk in
+          let text = String(decoding: chunk, as: UTF8.self)
+          append("stream← \(text)")
+          stream.send(Data(text.uppercased().utf8))
+        }
+        stream.onClose = { error in
+          append("stream closed\(error.map { ": \($0)" } ?? "")")
+        }
+      }
       // Answer phone sendRequest round trips: echo, uppercased.
       WearerLinkWatch.shared.onRequest = { event, reply in
         append("request \(event.path)")
