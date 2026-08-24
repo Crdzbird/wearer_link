@@ -161,6 +161,27 @@ final class WatchSessionBridge: NSObject {
     return dictionary[Envelope.payload] as? Data
   }
 
+  /// Latest value this device synced for [path].
+  func readOwnSyncData(path: String) -> Data? {
+    guard let dictionary = WCSession.default.applicationContext[path]
+      as? [String: Any] else { return nil }
+    return dictionary[Envelope.payload] as? Data
+  }
+
+  /// Every stored sync path under [prefix], own and received combined.
+  func listSyncPaths(prefix: String) -> [String] {
+    let session = WCSession.default
+    var paths = [String]()
+    for key in session.applicationContext.keys where key.hasPrefix(prefix) {
+      paths.append(key)
+    }
+    for key in session.receivedApplicationContext.keys
+    where key.hasPrefix(prefix) && !paths.contains(key) {
+      paths.append(key)
+    }
+    return paths
+  }
+
   /// Remove the value this device synced for [path].
   func deleteSyncData(path: String) throws {
     let session = WCSession.default

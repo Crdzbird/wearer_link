@@ -230,6 +230,16 @@ abstract class WearerLinkHostApi {
   @async
   void deleteSyncData(String path);
 
+  /// Latest value THIS device synced for [path] (mirror of what the
+  /// counterpart's readSyncData sees), or null.
+  @async
+  Uint8List? readOwnSyncData(String path);
+
+  /// Every sync path currently stored under [prefix] — own and received
+  /// values combined. Powers the synced store's key listing.
+  @async
+  List<String> listSyncPaths(String prefix);
+
   /// Queued background transfer that survives unreachability:
   /// DataClient with urgent flag (Android) / transferUserInfo (iOS).
   @async

@@ -1,21 +1,26 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:ui';
 
+import 'package:flutter/foundation.dart' show debugPrint, visibleForTesting;
 import 'package:flutter/services.dart';
-import 'package:meta/meta.dart';
 
 
 import 'src/background.dart';
 import 'src/codecs.dart';
 import 'src/messages.g.dart';
 import 'src/models.dart';
+import 'src/store.dart';
 import 'src/stream.dart';
+import 'src/transfer.dart';
 
 export 'src/background.dart' show WearerBackgroundHandler;
 export 'src/codecs.dart';
 export 'src/models.dart';
+export 'src/store.dart' show WearerStore;
 export 'src/stream.dart' show WearerStream;
+export 'src/transfer.dart';
 
 /// Entry point for phone ⇄ wearable communication.
 ///
@@ -66,6 +71,25 @@ class WearerLink {
   final _requestRoutes = <_Route>[];
   final _codecs = <Type, WearerCodec<Object?>>{};
 
+  WearerStore? _store;
+
+  /// The synced key-value store: both sides read/write the same keys,
+  /// newest write wins, values persist in the OS sync layer. See
+  /// [WearerStore].
+  WearerStore get store {
+    _scheduleDrain();
+    return _store ??= WearerStore.internal(_host);
+  }
+
+  /// Print every send/dispatch via [debugPrint] — field-debugging aid.
+  static bool verboseLogging = false;
+
+  final _diagnostics = StreamController<WearerDiagnostic>.broadcast();
+  int _sentEvents = 0;
+  int _receivedEvents = 0;
+  int _replayedEvents = 0;
+  int _dedupDropped = 0;
+
   // Session-level dedup: delivery is at-least-once, so an event can reach
   // the streams twice (e.g. live dispatch racing the startup replay). Ids
   // are unique per event; remember the recent ones and drop repeats.
@@ -115,6 +139,78 @@ class WearerLink {
   /// Streams the counterpart opened toward this device.
   Stream<WearerStream> get incomingStreams => _incomingStreams.stream;
 
+  /// Transfer a file with observable progress: the bytes ride a plugin
+  /// stream on the reserved `/__wlfile` path, so the counterpart must run
+  /// wearer_link >= 0.6 and be reachable for the whole transfer. For
+  /// fire-and-forget delivery (including to a killed counterpart app) use
+  /// [transferFile].
+  Future<WearerFileTransfer> transferFileTracked(
+    String path,
+    String filePath, {
+    String? nodeId,
+  }) async {
+    final file = File(filePath);
+    if (!file.existsSync()) {
+      throw WearerLinkException(
+        WearerErrorCode.sendFailed,
+        'No such file: $filePath',
+      );
+    }
+    final size = file.lengthSync();
+    final stream = await openStream('/__wlfile', nodeId: nodeId);
+    final transfer = WearerFileTransfer.internal(path, size);
+    _sentEvents++;
+    unawaited(() async {
+      try {
+        await stream.send(
+          Uint8List.fromList(utf8.encode(jsonEncode({'p': path, 's': size}))),
+        );
+        await for (final chunk in file.openRead()) {
+          await stream.send(
+            chunk is Uint8List ? chunk : Uint8List.fromList(chunk),
+          );
+          transfer.addSent(chunk.length);
+        }
+        await stream.close();
+        transfer.finish();
+      } catch (error) {
+        _diagnose(
+          WearerDiagnosticSeverity.error,
+          'transfer',
+          'tracked transfer of $path failed: $error',
+        );
+        unawaited(stream.close().catchError((_) {}));
+        transfer.finish(
+          error is WearerLinkException
+              ? error
+              : WearerLinkException(WearerErrorCode.sendFailed, '$error'),
+        );
+      }
+    }());
+    return transfer;
+  }
+
+  /// This session's traffic counters (a snapshot; poll for updates).
+  WearerStats get stats => WearerStats(
+        sentEvents: _sentEvents,
+        receivedEvents: _receivedEvents,
+        replayedEvents: _replayedEvents,
+        dedupDropped: _dedupDropped,
+        activeStreams: _streams.length,
+      );
+
+  /// Plugin-internal happenings that would otherwise die silently:
+  /// abnormal stream closes, failed tracked transfers.
+  Stream<WearerDiagnostic> get diagnostics => _diagnostics.stream;
+
+  /// Round-trip latency to the counterpart, measured over the built-in
+  /// status responder (no app code involved on the other side).
+  Future<Duration> pingLatency({String? nodeId}) async {
+    final stopwatch = Stopwatch()..start();
+    await getCounterpartStatus(nodeId: nodeId);
+    return stopwatch.elapsed;
+  }
+
   /// Current pairing/reachability snapshot.
   Future<WearerCompanionStatus> getCompanionStatus() => _guard(() async =>
       WearerCompanionStatus.fromDto(await _host.getCompanionStatus()));
@@ -162,6 +258,10 @@ class WearerLink {
     String? nodeId,
     bool queueIfUnreachable = false,
   }) async {
+    _sentEvents++;
+    if (verboseLogging) {
+      debugPrint('wearer_link -> message $path (${payload.length}B)');
+    }
     try {
       await _guard(() => _host.sendMessage(path, payload, nodeId));
     } on WearerLinkException catch (e) {
@@ -211,8 +311,10 @@ class WearerLink {
   /// Sync latest state for [path]. Newest value wins; delivered to the
   /// counterpart even if it is unreachable right now (Android `DataClient`
   /// item / iOS `updateApplicationContext`).
-  Future<void> syncData(String path, Uint8List payload) =>
-      _guard(() => _host.syncData(path, payload));
+  Future<void> syncData(String path, Uint8List payload) {
+    _sentEvents++;
+    return _guard(() => _host.syncData(path, payload));
+  }
 
   /// Latest value the counterpart synced for [path] — the current state
   /// behind [dataEvents] — or null if it never synced one.
@@ -227,15 +329,19 @@ class WearerLink {
   /// Queue [payload] for guaranteed background delivery — every call is
   /// delivered, in order, once the counterpart connects (Android urgent
   /// `DataClient` item / iOS `transferUserInfo`).
-  Future<void> transferData(String path, Uint8List payload) =>
-      _guard(() => _host.transferData(path, payload));
+  Future<void> transferData(String path, Uint8List payload) {
+    _sentEvents++;
+    return _guard(() => _host.transferData(path, payload));
+  }
 
   /// Transfer the file at [filePath] to the counterpart, which receives it
   /// as a [fileEvents] event. Android: ChannelClient — requires a reachable
   /// counterpart. iOS: `WCSession.transferFile` — queued and delivered when
   /// the counterpart next connects.
-  Future<void> transferFile(String path, String filePath, {String? nodeId}) =>
-      _guard(() => _host.transferFile(path, filePath, nodeId));
+  Future<void> transferFile(String path, String filePath, {String? nodeId}) {
+    _sentEvents++;
+    return _guard(() => _host.transferFile(path, filePath, nodeId));
+  }
 
   /// Push fresh complication data to the watch face (iOS only).
   ///
@@ -453,14 +559,40 @@ class WearerLink {
     });
   }
 
+  void _diagnose(
+    WearerDiagnosticSeverity severity,
+    String area,
+    String message,
+  ) {
+    final diagnostic = WearerDiagnostic(severity, area, message);
+    if (verboseLogging) debugPrint('wearer_link $diagnostic');
+    _diagnostics.add(diagnostic);
+  }
+
   void _dispatch(WearerEventDto dto) {
-    if (!_seenIds.add(dto.id)) return; // duplicate replay/live race
+    if (!_seenIds.add(dto.id)) {
+      _dedupDropped++;
+      return; // duplicate replay/live race
+    }
+    _receivedEvents++;
+    if (dto.deliveredWhileDead) _replayedEvents++;
+    if (verboseLogging) {
+      debugPrint(
+        'wearer_link <- ${dto.kind.name} ${dto.path} '
+        '(${dto.payload.length}B${dto.deliveredWhileDead ? ', replayed' : ''})',
+      );
+    }
     if (_seenIds.length > _seenIdsCap) {
       _seenIds.remove(_seenIds.first); // Set keeps insertion order: drop oldest
     }
     if (dto.path == '/__wllaunch') {
       // Reserved plugin path: surface as a launch intent, not a data event.
       _launchIntents.add(_parseLaunchIntent(dto.payload));
+      return;
+    }
+    if (dto.path.startsWith('/__wlstore/')) {
+      // Reserved plugin path: a counterpart store record.
+      store.onRemoteRecord(dto.path, dto.payload);
       return;
     }
     final event = WearerEvent.fromDto(dto);
@@ -473,6 +605,73 @@ class WearerLink {
       case WearerEventKind.file:
         _fileEvents.add(event);
     }
+  }
+
+  /// Receive one inbound tracked file: header frame, then raw chunks; a
+  /// clean close completes the file and emits a file event.
+  void _receiveTrackedFile(WearerStream stream) {
+    String? userPath;
+    IOSink? sink;
+    File? target;
+    var received = 0;
+    stream.data.listen(
+      (chunk) {
+        if (userPath == null) {
+          try {
+            final header =
+                jsonDecode(utf8.decode(chunk)) as Map<String, Object?>;
+            userPath = header['p'] as String? ?? '/';
+            target = File(
+              '${Directory.systemTemp.path}/wearer_link_rx_'
+              '${DateTime.now().microsecondsSinceEpoch}',
+            );
+            sink = target!.openWrite();
+          } catch (e) {
+            _diagnose(
+              WearerDiagnosticSeverity.error,
+              'transfer',
+              'malformed tracked-transfer header: $e',
+            );
+            unawaited(stream.close().catchError((_) {}));
+          }
+          return;
+        }
+        sink?.add(chunk);
+        received += chunk.length;
+      },
+      onError: (Object _) {},
+      onDone: () async {
+        final path = userPath;
+        final file = target;
+        await sink?.close();
+        if (path == null || file == null) return;
+        _dispatch(
+          WearerEventDto(
+            id: 'tracked-${stream.id}',
+            kind: WearerEventKindDto.file,
+            path: path,
+            payload: Uint8List(0),
+            sourceNodeId: stream.peerNodeId,
+            timestampMillis: DateTime.now().millisecondsSinceEpoch,
+            deliveredWhileDead: false,
+            filePath: file.path,
+          ),
+        );
+      },
+    );
+    stream.done.catchError((Object error) {
+      // Abnormal close: drop the partial file.
+      sink?.close().then((_) async {
+        try {
+          await target?.delete();
+        } catch (_) {}
+      });
+      _diagnose(
+        WearerDiagnosticSeverity.error,
+        'transfer',
+        'inbound tracked transfer failed after $received bytes: $error',
+      );
+    });
   }
 
   static WearerLaunchIntent _parseLaunchIntent(Uint8List payload) {
@@ -547,7 +746,14 @@ class _WearerLinkFlutterApiImpl implements WearerLinkFlutterApi {
       streamId,
       () => WearerStream.internal(streamId, path, sourceNodeId, _link._host),
     );
-    if (incoming) _link._incomingStreams.add(stream);
+    if (!incoming) return;
+    if (path == '/__wlfile') {
+      // Reserved plugin stream: a tracked file transfer — receive it into
+      // a temp file and surface it as a file event, not a raw stream.
+      _link._receiveTrackedFile(stream);
+      return;
+    }
+    _link._incomingStreams.add(stream);
   }
 
   @override
@@ -556,6 +762,13 @@ class _WearerLinkFlutterApiImpl implements WearerLinkFlutterApi {
 
   @override
   void onStreamClosed(String streamId, String? error) {
+    if (error != null) {
+      _link._diagnose(
+        WearerDiagnosticSeverity.warning,
+        'stream',
+        'stream $streamId closed abnormally: $error',
+      );
+    }
     _link._streams.remove(streamId)?.markClosed(error);
   }
 }

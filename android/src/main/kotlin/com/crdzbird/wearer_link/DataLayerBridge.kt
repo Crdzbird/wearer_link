@@ -137,6 +137,56 @@ class DataLayerBridge(private val context: Context) {
     }
   }
 
+  /** Latest value THIS device synced for [userPath]. */
+  suspend fun readOwnSyncData(userPath: String): ByteArray? {
+    val localId = try {
+      nodeClient.localNode.await().id
+    } catch (e: Exception) {
+      throw FlutterError("unknown", "localNode failed: $e", null)
+    }
+    val wirePath = WireProtocol.syncPath(userPath)
+    val buffer = try {
+      dataClient.getDataItems(
+        Uri.Builder().scheme("wear").path(wirePath).build(),
+        com.google.android.gms.wearable.DataClient.FILTER_LITERAL,
+      ).await()
+    } catch (e: Exception) {
+      throw FlutterError("unknown", "getDataItems($wirePath) failed: $e", null)
+    }
+    try {
+      for (item in buffer) {
+        if (item.uri.host != localId) continue
+        val map = com.google.android.gms.wearable.DataMapItem.fromDataItem(item.freeze()).dataMap
+        return map.getByteArray(WireProtocol.KEY_PAYLOAD)
+      }
+      return null
+    } finally {
+      buffer.release()
+    }
+  }
+
+  /** Every stored sync path under [prefix], own and received combined. */
+  suspend fun listSyncPaths(prefix: String): List<String> {
+    val wirePrefix = WireProtocol.syncPath(prefix)
+    val buffer = try {
+      dataClient.getDataItems(
+        Uri.Builder().scheme("wear").path(wirePrefix).build(),
+        com.google.android.gms.wearable.DataClient.FILTER_PREFIX,
+      ).await()
+    } catch (e: Exception) {
+      throw FlutterError("unknown", "getDataItems($wirePrefix) failed: $e", null)
+    }
+    try {
+      val paths = LinkedHashSet<String>()
+      for (item in buffer) {
+        item.uri.path?.let { paths.add(WireProtocol.userPathOfSync(it)) }
+      }
+      return paths.toList()
+    } finally {
+      buffer.release()
+    }
+  }
+
   /** Delete the value THIS device synced for [userPath]. */
   suspend fun deleteSyncData(userPath: String) {
     val localId = try {

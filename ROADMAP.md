@@ -145,7 +145,7 @@ counterpart-status verified on the simulator pair; CI green; CHANGELOG.
 
 The features that make companion apps product-shaped.
 
-### 7.1 Synced KV store
+### 7.1 Synced KV store ✅ shipped (Dart endpoints; watchOS-native accessor -> M8 backlog)
 
 ```dart
 final store = wearer.store;                  // WearerStore
@@ -166,7 +166,7 @@ store.keys;                                  // snapshot
   key/value budget (values above the message cap ride the blob route).
 - Effort: M–L. The headline of 0.6.0.
 
-### 7.2 File transfer progress
+### 7.2 File transfer progress ✅ shipped (pure Dart over plugin streams)
 
 ```dart
 final transfer = await wearer.transferFileTracked('/photos/1', path);
@@ -181,7 +181,7 @@ await transfer.done;
   fallback for untracked transfers.
 - Effort: M.
 
-### 7.3 Diagnostics & link quality
+### 7.3 Diagnostics & link quality ✅ shipped (session-scoped; persistent native counters deferred)
 
 ```dart
 wearer.diagnostics;                          // Stream<WearerDiagnostic>
@@ -249,6 +249,7 @@ The simulator-untestable behaviors, tracked as a table in this file:
 | Complication push budget behavior | n/a | ⬜ |
 | Tile/complication surface update | ⬜ needs app with tile | n/a |
 | Store conflict under real latency | ⬜ | ⬜ |
+| Tracked transfer progress on hardware | ⬜ (needs Dart both ends) | n/a (native watch) |
 
 ---
 

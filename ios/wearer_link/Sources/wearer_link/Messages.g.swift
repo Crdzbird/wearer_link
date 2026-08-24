@@ -623,6 +623,12 @@ protocol WearerLinkHostApi {
   /// Remove the value THIS device synced for [path] (the counterpart's own
   /// value is theirs to delete).
   func deleteSyncData(path: String, completion: @escaping (Result<Void, Error>) -> Void)
+  /// Latest value THIS device synced for [path] (mirror of what the
+  /// counterpart's readSyncData sees), or null.
+  func readOwnSyncData(path: String, completion: @escaping (Result<FlutterStandardTypedData?, Error>) -> Void)
+  /// Every sync path currently stored under [prefix] — own and received
+  /// values combined. Powers the synced store's key listing.
+  func listSyncPaths(prefix: String, completion: @escaping (Result<[String], Error>) -> Void)
   /// Queued background transfer that survives unreachability:
   /// DataClient with urgent flag (Android) / transferUserInfo (iOS).
   func transferData(path: String, payload: FlutterStandardTypedData, completion: @escaping (Result<Void, Error>) -> Void)
@@ -822,6 +828,44 @@ class WearerLinkHostApiSetup {
       }
     } else {
       deleteSyncDataChannel.setMessageHandler(nil)
+    }
+    /// Latest value THIS device synced for [path] (mirror of what the
+    /// counterpart's readSyncData sees), or null.
+    let readOwnSyncDataChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.wearer_link.WearerLinkHostApi.readOwnSyncData\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+    if let api = api {
+      readOwnSyncDataChannel.setMessageHandler { message, reply in
+        let args = message as! [Any?]
+        let pathArg = args[0] as! String
+        api.readOwnSyncData(path: pathArg) { result in
+          switch result {
+          case .success(let res):
+            reply(wrapResult(res))
+          case .failure(let error):
+            reply(wrapError(error))
+          }
+        }
+      }
+    } else {
+      readOwnSyncDataChannel.setMessageHandler(nil)
+    }
+    /// Every sync path currently stored under [prefix] — own and received
+    /// values combined. Powers the synced store's key listing.
+    let listSyncPathsChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.wearer_link.WearerLinkHostApi.listSyncPaths\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+    if let api = api {
+      listSyncPathsChannel.setMessageHandler { message, reply in
+        let args = message as! [Any?]
+        let prefixArg = args[0] as! String
+        api.listSyncPaths(prefix: prefixArg) { result in
+          switch result {
+          case .success(let res):
+            reply(wrapResult(res))
+          case .failure(let error):
+            reply(wrapError(error))
+          }
+        }
+      }
+    } else {
+      listSyncPathsChannel.setMessageHandler(nil)
     }
     /// Queued background transfer that survives unreachability:
     /// DataClient with urgent flag (Android) / transferUserInfo (iOS).

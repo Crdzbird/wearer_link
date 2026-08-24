@@ -76,6 +76,24 @@ if (caps.stream) ...;                            // + companionLaunch, maxMessag
 // Pause/resume delivery (lossless: everything queues while disabled)
 await wearer.setEventDeliveryEnabled(false);
 
+// Synced key-value store: both sides read/write, newest write wins,
+// values persist in the OS sync layer (Dart endpoints; the native watch
+// lib gets an accessor in a later release)
+await wearer.store.set('workout', bytes);
+wearer.store.watch('workout').listen((v) => ...);
+final current = await wearer.store.get('workout');
+
+// Tracked file transfer with progress (both ends on wearer_link >= 0.6)
+final transfer = await wearer.transferFileTracked('/photos/1', path);
+transfer.progress.listen((p) => ...);           // 0.0 -> 1.0
+await transfer.done;
+
+// Diagnostics
+final rtt = await wearer.pingLatency();          // built-in responder RTT
+print(wearer.stats);                             // session counters
+wearer.diagnostics.listen(print);                // silent failures, surfaced
+WearerLink.verboseLogging = true;
+
 // Files (received into the app cache dir; move if you need durability)
 await wearer.transferFile('/photos/1', localFile.path);
 wearer.fileEvents.listen((e) => print('got file: ${e.filePath}'));

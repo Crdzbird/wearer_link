@@ -54,6 +54,13 @@ class _FakeHost extends WearerLinkHostApi {
   Future<void> deleteSyncData(String path) async => syncStore.remove(path);
 
   @override
+  Future<Uint8List?> readOwnSyncData(String path) async => null;
+
+  @override
+  Future<List<String>> listSyncPaths(String prefix) async =>
+      syncStore.keys.where((p) => p.startsWith(prefix)).toList();
+
+  @override
   Future<void> syncData(String path, Uint8List payload) async =>
       synced.add((path, payload));
 

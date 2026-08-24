@@ -18,6 +18,24 @@ Working prototype.
 * watchOS: `WearerLinkWatch` Swift package for native watch apps
   (activate/send/sync/transfer/wake, startup event buffering).
 
+## 0.6.0
+
+M7: product surfaces.
+
+* `wearer.store` — synced reactive KV store: last-writer-wins (timestamp +
+  writer tiebreak), tombstoned deletes, values persisted by the OS sync
+  layer itself (survive restarts, arrive after offline gaps). Dart
+  endpoints; values capped at 48KB (store state, not payloads). Live
+  set/get/keys verified on the simulator pair.
+* `transferFileTracked` — file transfer with a 0..1 progress stream and
+  `done` future, carried over a plugin stream on `/__wlfile` (both ends
+  need >= 0.6 and a live link; `transferFile` remains the fire-and-forget
+  path). 150KB round-trips byte-identical on the test harness.
+* Diagnostics: `stats` (session counters incl. replayed/dedup-dropped),
+  `diagnostics` stream for silent failures, `pingLatency()` over the
+  built-in status responder, `WearerLink.verboseLogging`.
+* New host APIs backing the store: `readOwnSyncData`, `listSyncPaths`.
+
 ## 0.5.0
 
 M6: developer-experience core.

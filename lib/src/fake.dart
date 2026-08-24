@@ -331,6 +331,15 @@ class _FakeHost extends WearerLinkHostApi {
   Future<void> deleteSyncData(String path) async => syncedByMe.remove(path);
 
   @override
+  Future<Uint8List?> readOwnSyncData(String path) async => syncedByMe[path];
+
+  @override
+  Future<List<String>> listSyncPaths(String prefix) async => {
+        ...syncedByMe.keys,
+        ...other.syncedByMe.keys,
+      }.where((p) => p.startsWith(prefix)).toList();
+
+  @override
   Future<void> transferData(String path, Uint8List payload) async {
     // Size-unlimited by contract (oversized payloads ride the blob route
     // natively); observable result is identical, so deliver directly.

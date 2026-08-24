@@ -686,6 +686,16 @@ interface WearerLinkHostApi {
    */
   fun deleteSyncData(path: String, callback: (Result<Unit>) -> Unit)
   /**
+   * Latest value THIS device synced for [path] (mirror of what the
+   * counterpart's readSyncData sees), or null.
+   */
+  fun readOwnSyncData(path: String, callback: (Result<ByteArray?>) -> Unit)
+  /**
+   * Every sync path currently stored under [prefix] — own and received
+   * values combined. Powers the synced store's key listing.
+   */
+  fun listSyncPaths(prefix: String, callback: (Result<List<String>>) -> Unit)
+  /**
    * Queued background transfer that survives unreachability:
    * DataClient with urgent flag (Android) / transferUserInfo (iOS).
    */
@@ -906,6 +916,46 @@ interface WearerLinkHostApi {
                 reply.reply(MessagesPigeonUtils.wrapError(error))
               } else {
                 reply.reply(MessagesPigeonUtils.wrapResult(null))
+              }
+            }
+          }
+        } else {
+          channel.setMessageHandler(null)
+        }
+      }
+      run {
+        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.wearer_link.WearerLinkHostApi.readOwnSyncData$separatedMessageChannelSuffix", codec)
+        if (api != null) {
+          channel.setMessageHandler { message, reply ->
+            val args = message as List<Any?>
+            val pathArg = args[0] as String
+            api.readOwnSyncData(pathArg) { result: Result<ByteArray?> ->
+              val error = result.exceptionOrNull()
+              if (error != null) {
+                reply.reply(MessagesPigeonUtils.wrapError(error))
+              } else {
+                val data = result.getOrNull()
+                reply.reply(MessagesPigeonUtils.wrapResult(data))
+              }
+            }
+          }
+        } else {
+          channel.setMessageHandler(null)
+        }
+      }
+      run {
+        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.wearer_link.WearerLinkHostApi.listSyncPaths$separatedMessageChannelSuffix", codec)
+        if (api != null) {
+          channel.setMessageHandler { message, reply ->
+            val args = message as List<Any?>
+            val prefixArg = args[0] as String
+            api.listSyncPaths(prefixArg) { result: Result<List<String>> ->
+              val error = result.exceptionOrNull()
+              if (error != null) {
+                reply.reply(MessagesPigeonUtils.wrapError(error))
+              } else {
+                val data = result.getOrNull()
+                reply.reply(MessagesPigeonUtils.wrapResult(data))
               }
             }
           }

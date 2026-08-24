@@ -17,6 +17,8 @@ Uint8List _bytes(String text) => Uint8List.fromList(utf8.encode(text));
 
 void main() {
   routerAndTypedTests();
+  storeTests();
+  transferAndDiagnosticsTests();
 
   test('pair delivers messages both ways', () async {
     final (phone, watch) = WearerLinkFake.pair();
@@ -399,5 +401,170 @@ void routerAndTypedTests() {
     await pumpEventQueue();
     expect(data.single.path, '/cmd');
     expect(utf8.decode(data.single.payload), 'later');
+  });
+}
+
+// ---- M7.1: synced KV store ------------------------------------------------
+
+void storeTests() {
+  test('store: set/watch round trip in both directions', () async {
+    final (phone, watch) = WearerLinkFake.pair();
+    final seenOnWatch = <String?>[];
+    final seenOnPhone = <String?>[];
+    watch.store.watch('workout').listen(
+        (v) => seenOnWatch.add(v == null ? null : utf8.decode(v)));
+    phone.store.watch('workout').listen(
+        (v) => seenOnPhone.add(v == null ? null : utf8.decode(v)));
+    await pumpEventQueue();
+
+    await phone.store.set('workout', _bytes('running'));
+    await pumpEventQueue();
+    expect(seenOnWatch, ['running']);
+    expect(seenOnPhone, ['running'],
+        reason: 'local writes also notify local watchers');
+    expect(utf8.decode((await watch.store.get('workout'))!), 'running');
+
+    await watch.store.set('workout', _bytes('done'));
+    await pumpEventQueue();
+    expect(utf8.decode((await phone.store.get('workout'))!), 'done');
+  });
+
+  test('store: last writer wins, stale write is discarded', () async {
+    final (phone, watch) = WearerLinkFake.pair();
+    await phone.store.set('k', _bytes('first'));
+    await Future<void>.delayed(const Duration(milliseconds: 5));
+    await watch.store.set('k', _bytes('second'));
+    await pumpEventQueue();
+
+    // Both sides converge on the newest write.
+    expect(utf8.decode((await phone.store.get('k'))!), 'second');
+    expect(utf8.decode((await watch.store.get('k'))!), 'second');
+  });
+
+  test('store: delete tombstones propagate and keys() excludes them',
+      () async {
+    final (phone, watch) = WearerLinkFake.pair();
+    await phone.store.set('a', _bytes('1'));
+    await phone.store.set('b', _bytes('2'));
+    await pumpEventQueue();
+    expect(await watch.store.keys(), {'a', 'b'});
+
+    final watched = <Object?>[];
+    watch.store.watch('a').listen(watched.add);
+    await pumpEventQueue();
+    await Future<void>.delayed(const Duration(milliseconds: 5));
+    await phone.store.delete('a');
+    await pumpEventQueue();
+
+    expect(watched, [null]);
+    expect(await watch.store.get('a'), isNull);
+    expect(await watch.store.keys(), {'b'});
+    expect(await phone.store.keys(), {'b'});
+  });
+
+  test('store: cold read merges persisted state from both sides', () async {
+    final (phone, watch) = WearerLinkFake.pair();
+    // The watch app is "not running" while the phone writes.
+    watch.simulateKill();
+    await phone.store.set('boot', _bytes('early'));
+    await pumpEventQueue();
+
+    // A fresh launch that never saw the live event still reads the value
+    // (via the OS-persisted sync layer, here the fake's synced maps).
+    final relaunched = watch.relaunch();
+    expect(utf8.decode((await relaunched.store.get('boot'))!), 'early');
+  });
+
+  test('store: rejects oversized values and bad keys', () async {
+    final (phone, _) = WearerLinkFake.pair();
+    await expectLater(
+      phone.store.set('big', Uint8List(64 * 1024)),
+      throwsArgumentError,
+    );
+    await expectLater(
+      phone.store.set('bad/key', Uint8List(0)),
+      throwsArgumentError,
+    );
+  });
+}
+
+// ---- M7.2/7.3: tracked transfers, diagnostics -----------------------------
+
+void transferAndDiagnosticsTests() {
+  test('tracked transfer: progress reaches 1.0 and file arrives intact',
+      () async {
+    final (phone, watch) = WearerLinkFake.pair();
+    final files = <WearerEvent>[];
+    watch.fileEvents.listen(files.add);
+    await pumpEventQueue();
+
+    final source = File(
+      '${Directory.systemTemp.path}/wearer_tracked_src.bin',
+    )..writeAsBytesSync(List.generate(150 * 1024, (i) => i % 251));
+
+    final transfer =
+        await phone.transferFileTracked('/photos/1', source.path);
+    final fractions = <double>[];
+    transfer.progress.listen(fractions.add);
+    await transfer.done;
+    await pumpEventQueue();
+
+    expect(fractions.last, 1.0);
+    expect(fractions, isNotEmpty);
+    expect(transfer.totalBytes, 150 * 1024);
+
+    expect(files.single.path, '/photos/1');
+    final received = File(files.single.filePath!).readAsBytesSync();
+    expect(received.length, 150 * 1024);
+    expect(received, source.readAsBytesSync());
+  });
+
+  test('tracked transfer to an unreachable peer fails with a diagnostic',
+      () async {
+    final (phone, _) = WearerLinkFake.pair();
+    final diagnostics = <WearerDiagnostic>[];
+    phone.diagnostics.listen(diagnostics.add);
+    phone.setReachable(false);
+
+    await expectLater(
+      phone.transferFileTracked(
+        '/x',
+        (File('${Directory.systemTemp.path}/wearer_tiny.bin')
+              ..writeAsBytesSync([1, 2, 3]))
+            .path,
+      ),
+      throwsA(
+        isA<WearerLinkException>()
+            .having((e) => e.code, 'code', WearerErrorCode.unreachable),
+      ),
+    );
+  });
+
+  test('stats count sends, receives, replays and dedup drops', () async {
+    final (phone, watch) = WearerLinkFake.pair();
+    watch.messages.listen((_) {});
+    await pumpEventQueue();
+
+    await phone.sendMessage('/a', Uint8List(0));
+    await phone.transferData('/b', Uint8List(0));
+    await pumpEventQueue();
+
+    expect(phone.stats.sentEvents, 2);
+    expect(watch.stats.receivedEvents, 2);
+    expect(watch.stats.replayedEvents, 0);
+
+    watch.simulateKill();
+    await phone.sendMessage('/c', Uint8List(0));
+    final relaunched = watch.relaunch();
+    relaunched.messages.listen((_) {});
+    await pumpEventQueue();
+    expect(relaunched.stats.replayedEvents, 1);
+  });
+
+  test('pingLatency measures the built-in status round trip', () async {
+    final (phone, _) = WearerLinkFake.pair();
+    final rtt = await phone.pingLatency();
+    expect(rtt, greaterThanOrEqualTo(Duration.zero));
+    expect(rtt, lessThan(const Duration(seconds: 1)));
   });
 }

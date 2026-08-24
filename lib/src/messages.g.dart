@@ -706,6 +706,48 @@ class WearerLinkHostApi {
     ;
   }
 
+  /// Latest value THIS device synced for [path] (mirror of what the
+  /// counterpart's readSyncData sees), or null.
+  Future<Uint8List?> readOwnSyncData(String path) async {
+    final pigeonVar_channelName = 'dev.flutter.pigeon.wearer_link.WearerLinkHostApi.readOwnSyncData$pigeonVar_messageChannelSuffix';
+    final pigeonVar_channel = BasicMessageChannel<Object?>(
+      pigeonVar_channelName,
+      pigeonChannelCodec,
+      binaryMessenger: pigeonVar_binaryMessenger,
+    );
+    final Future<Object?> pigeonVar_sendFuture = pigeonVar_channel.send(<Object?>[path]);
+    final pigeonVar_replyList = await pigeonVar_sendFuture as List<Object?>?;
+
+    final Object? pigeonVar_replyValue = _extractReplyValueOrThrow(
+        pigeonVar_replyList,
+        pigeonVar_channelName,
+        isNullValid: true,
+    )
+    ;
+    return pigeonVar_replyValue as Uint8List?;
+  }
+
+  /// Every sync path currently stored under [prefix] — own and received
+  /// values combined. Powers the synced store's key listing.
+  Future<List<String>> listSyncPaths(String prefix) async {
+    final pigeonVar_channelName = 'dev.flutter.pigeon.wearer_link.WearerLinkHostApi.listSyncPaths$pigeonVar_messageChannelSuffix';
+    final pigeonVar_channel = BasicMessageChannel<Object?>(
+      pigeonVar_channelName,
+      pigeonChannelCodec,
+      binaryMessenger: pigeonVar_binaryMessenger,
+    );
+    final Future<Object?> pigeonVar_sendFuture = pigeonVar_channel.send(<Object?>[prefix]);
+    final pigeonVar_replyList = await pigeonVar_sendFuture as List<Object?>?;
+
+    final Object? pigeonVar_replyValue = _extractReplyValueOrThrow(
+        pigeonVar_replyList,
+        pigeonVar_channelName,
+        isNullValid: false,
+    )
+    ;
+    return (pigeonVar_replyValue! as List<Object?>).cast<String>();
+  }
+
   /// Queued background transfer that survives unreachability:
   /// DataClient with urgent flag (Android) / transferUserInfo (iOS).
   Future<void> transferData(String path, Uint8List payload) async {

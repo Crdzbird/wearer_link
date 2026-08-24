@@ -137,6 +137,22 @@ extension WearerLinkPlugin: WearerLinkHostApi {
     }))
   }
 
+  func readOwnSyncData(
+    path: String,
+    completion: @escaping (Result<FlutterStandardTypedData?, Error>) -> Void
+  ) {
+    completion(.success(bridge.readOwnSyncData(path: path).map {
+      FlutterStandardTypedData(bytes: $0)
+    }))
+  }
+
+  func listSyncPaths(
+    prefix: String,
+    completion: @escaping (Result<[String], Error>) -> Void
+  ) {
+    completion(.success(bridge.listSyncPaths(prefix: prefix)))
+  }
+
   func deleteSyncData(
     path: String,
     completion: @escaping (Result<Void, Error>) -> Void

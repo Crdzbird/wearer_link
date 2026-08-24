@@ -111,6 +111,20 @@ class WearerLinkPlugin : FlutterPlugin, WearerLinkHostApi {
     launchWith(callback) { it.deleteSyncData(path) }
   }
 
+  override fun readOwnSyncData(
+    path: String,
+    callback: (Result<ByteArray?>) -> Unit,
+  ) {
+    launchWith(callback) { it.readOwnSyncData(path) }
+  }
+
+  override fun listSyncPaths(
+    prefix: String,
+    callback: (Result<List<String>>) -> Unit,
+  ) {
+    launchWith(callback) { it.listSyncPaths(prefix) }
+  }
+
   override fun syncData(
     path: String,
     payload: ByteArray,

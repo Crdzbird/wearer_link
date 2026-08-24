@@ -219,6 +219,22 @@ class _HomePageState extends State<HomePage> {
                   child: const Text('Read sync'),
                 ),
                 FilledButton.tonal(
+                  onPressed: () => _run('store', () async {
+                    await _link.store.set(
+                      'demo',
+                      Uint8List.fromList(
+                        utf8.encode('saved ${DateTime.now()}'),
+                      ),
+                    );
+                    final value = await _link.store.get('demo');
+                    _append('store demo = ${_decode(value!)}');
+                    _append('store keys = ${await _link.store.keys()}');
+                    final rtt = await _link.pingLatency();
+                    _append('rtt = ${rtt.inMilliseconds}ms');
+                  }),
+                  child: const Text('Store'),
+                ),
+                FilledButton.tonal(
                   onPressed: () => _run('status', () async {
                     final nodes = await _link.getNodes();
                     _append('nodes: $nodes');
