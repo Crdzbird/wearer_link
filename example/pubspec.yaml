@@ -29,6 +29,9 @@ dependencies:
   # Use with the CupertinoIcons class for iOS style icons.
   cupertino_icons: ^1.0.8
   image_picker: ^1.2.3
+  record: ^7.1.1
+  audioplayers: ^6.8.1
+  video_player: ^2.14.0
 
 dev_dependencies:
   integration_test:

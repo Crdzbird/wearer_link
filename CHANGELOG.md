@@ -18,6 +18,21 @@ Working prototype.
 * watchOS: `WearerLinkWatch` Swift package for native watch apps
   (activate/send/sync/transfer/wake, startup event buffering).
 
+## 1.1.1
+
+Example app: real media, rendered.
+
+* "Share photo" / "Record 5s audio" / "Send video": picked or mic-recorded
+  media rides a tracked transfer and is **rendered on the receiver** —
+  photo card, auto-playing audio clip with replay control, inline looping
+  video player. All three verified on the Pixel 7 Pro -> Pixel Watch 2
+  pair (video decoded and looping on the watch; phone-recorded clip
+  played through the watch speaker).
+* Data demos gained live result chips (synced counter, RTT, counterpart
+  battery) instead of log-only text.
+* New example deps: image_picker, record, audioplayers, video_player;
+  RECORD_AUDIO / NSMicrophoneUsageDescription added.
+
 ## 1.1.0
 
 * **watchOS-native store accessor**: `WearerLinkWatch.shared.store` —
