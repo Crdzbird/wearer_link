@@ -1,5 +1,7 @@
 import 'dart:typed_data';
 
+import 'package:meta/meta.dart';
+
 import 'messages.g.dart';
 
 /// Reachability of the paired counterpart device.
@@ -20,6 +22,8 @@ enum WearerConnectionState {
   /// The counterpart can receive interactive messages right now.
   reachable;
 
+  /// Internal: maps the wire enum.
+  @internal
   static WearerConnectionState fromDto(ConnectionStateDto dto) =>
       switch (dto) {
         ConnectionStateDto.unsupported => unsupported,
@@ -32,20 +36,25 @@ enum WearerConnectionState {
 
 /// Snapshot of the relationship with the counterpart device.
 class WearerCompanionStatus {
+  /// Creates a snapshot (produced by the plugin; apps rarely construct it).
   const WearerCompanionStatus({required this.state, required this.nodes});
 
+  /// Internal: maps the wire DTO.
+  @internal
   factory WearerCompanionStatus.fromDto(CompanionStatusDto dto) =>
       WearerCompanionStatus(
         state: WearerConnectionState.fromDto(dto.state),
         nodes: List.unmodifiable(dto.nodes),
       );
 
+  /// Pairing/reachability classification.
   final WearerConnectionState state;
 
   /// Ids of reachable counterpart nodes. Android can report several
   /// (multiple watches); iOS reports at most one.
   final List<String> nodes;
 
+  /// Whether interactive messages can be delivered right now.
   bool get isReachable => state == WearerConnectionState.reachable;
 
   @override
@@ -66,6 +75,7 @@ enum WearerEventKind {
 
 /// An event received from the counterpart device.
 class WearerEvent {
+  /// Creates an event (produced by the plugin; apps rarely construct it).
   const WearerEvent({
     required this.id,
     required this.kind,
@@ -77,6 +87,8 @@ class WearerEvent {
     this.filePath,
   });
 
+  /// Internal: maps the wire DTO.
+  @internal
   factory WearerEvent.fromDto(WearerEventDto dto) => WearerEvent(
         id: dto.id,
         kind: switch (dto.kind) {
@@ -96,15 +108,19 @@ class WearerEvent {
   /// (delivery is at-least-once).
   final String id;
 
+  /// How the event crossed the boundary.
   final WearerEventKind kind;
 
   /// Application-defined routing path, e.g. `/workout/update`.
   final String path;
 
+  /// Raw payload bytes (empty for [WearerEventKind.file] events).
   final Uint8List payload;
 
+  /// Node id of the sending device.
   final String sourceNodeId;
 
+  /// Sender-side creation time.
   final DateTime timestamp;
 
   /// True when this event arrived while the app was not running and was
@@ -134,6 +150,8 @@ enum WearerCompanionLaunch {
   /// The OS offers no way to launch the counterpart app.
   none;
 
+  /// Internal: maps the wire enum.
+  @internal
   static WearerCompanionLaunch fromDto(CompanionLaunchDto dto) =>
       switch (dto) {
         CompanionLaunchDto.foreground => foreground,
@@ -145,6 +163,7 @@ enum WearerCompanionLaunch {
 /// What this device/pairing actually supports. Honest OS facts — a `false`
 /// here is an OS policy, not a plugin gap.
 class WearerCapabilities {
+  /// Creates a report (produced by the plugin; apps rarely construct it).
   const WearerCapabilities({
     required this.message,
     required this.request,
@@ -159,6 +178,8 @@ class WearerCapabilities {
     required this.maxMessageBytes,
   });
 
+  /// Internal: maps the wire DTO.
+  @internal
   factory WearerCapabilities.fromDto(WearerCapabilitiesDto dto) =>
       WearerCapabilities(
         message: dto.message,
@@ -174,16 +195,26 @@ class WearerCapabilities {
         maxMessageBytes: dto.maxMessageBytes,
       );
 
+  /// `sendMessage` support.
   final bool message;
+
+  /// `sendRequest` support.
   final bool request;
+
+  /// `syncData` support.
   final bool syncData;
+
+  /// `transferData` support.
   final bool transferData;
+
+  /// `transferFile` support.
   final bool transferFile;
 
   /// Bidirectional streams (Android: native ChannelClient; iOS: message
   /// framing — needs a reachable counterpart in both cases).
   final bool stream;
 
+  /// How (whether) `launchCompanion` can work here.
   final WearerCompanionLaunch companionLaunch;
 
   /// `updateComplication` pushes (iOS only).
@@ -207,18 +238,22 @@ class WearerCapabilities {
 
 /// A connected counterpart node.
 class WearerNode {
+  /// Creates a node description (produced by the plugin).
   const WearerNode({
     required this.id,
     required this.displayName,
     required this.isNearby,
   });
 
+  /// Internal: maps the wire DTO.
+  @internal
   factory WearerNode.fromDto(WearerNodeDto dto) => WearerNode(
         id: dto.id,
         displayName: dto.displayName,
         isNearby: dto.isNearby,
       );
 
+  /// Stable node id, usable as `nodeId` in targeted sends.
   final String id;
 
   /// Human-readable device name where the platform provides one.
@@ -232,17 +267,20 @@ class WearerNode {
   String toString() => 'WearerNode($displayName, $id, nearby: $isNearby)';
 }
 
-/// The counterpart device's vitals (see `getCounterpartStatus`).
-class WearerCounterpartStatus {
-  const WearerCounterpartStatus({
+/// The counterpart device's vitals (see `getCounterpartVitals`).
+class WearerCounterpartVitals {
+  /// Creates a vitals snapshot (produced by the plugin).
+  const WearerCounterpartVitals({
     required this.batteryPercent,
     required this.isCharging,
     required this.model,
     required this.osVersion,
   });
 
-  factory WearerCounterpartStatus.fromDto(CounterpartStatusDto dto) =>
-      WearerCounterpartStatus(
+  /// Internal: maps the wire DTO.
+  @internal
+  factory WearerCounterpartVitals.fromDto(CounterpartVitalsDto dto) =>
+      WearerCounterpartVitals(
         batteryPercent: dto.batteryPercent,
         isCharging: dto.isCharging,
         model: dto.model,
@@ -251,22 +289,31 @@ class WearerCounterpartStatus {
 
   /// 0–100, or -1 when the counterpart could not read it.
   final int batteryPercent;
+  /// Whether the counterpart is charging (or full, on iOS/watchOS).
   final bool isCharging;
+
+  /// Device model, e.g. `Google Pixel Watch 2`, `Apple Watch`.
   final String model;
+
+  /// OS name + version, e.g. `Android 14`, `watchOS 26.5`.
   final String osVersion;
 
   @override
   String toString() =>
-      'WearerCounterpartStatus($model $osVersion, $batteryPercent%'
+      'WearerCounterpartVitals($model $osVersion, $batteryPercent%'
       '${isCharging ? ', charging' : ''})';
 }
 
 /// A companion-launch intent delivered to the launched app
 /// (see `launchCompanion(route:, args:)`).
 class WearerLaunchIntent {
+  /// Creates a launch intent (produced by the plugin).
   const WearerLaunchIntent({this.route, this.args});
 
+  /// The route the launcher asked this app to open, if any.
   final String? route;
+
+  /// Structured arguments accompanying [route], if any.
   final Map<String, Object?>? args;
 
   @override
@@ -296,10 +343,17 @@ enum WearerErrorCode {
   unknown,
 }
 
+/// A typed failure from the plugin — [code] tells the caller whether it is
+/// an OS policy ([WearerErrorCode.unsupported]), a transient link condition
+/// ([WearerErrorCode.unreachable]), or a delivery failure.
 class WearerLinkException implements Exception {
+  /// Creates an exception with a typed [code] and human-readable [message].
   const WearerLinkException(this.code, this.message);
 
+  /// Machine-checkable failure classification.
   final WearerErrorCode code;
+
+  /// Human-readable detail for logs.
   final String message;
 
   @override

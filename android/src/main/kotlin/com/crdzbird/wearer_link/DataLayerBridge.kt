@@ -381,7 +381,7 @@ class DataLayerBridge(private val context: Context) {
   }
 
   /** Ask the counterpart's built-in /__wlstatus responder for its vitals. */
-  suspend fun getCounterpartStatus(nodeId: String?): CounterpartStatusDto {
+  suspend fun getCounterpartVitals(nodeId: String?): CounterpartVitalsDto {
     val node = singleTargetNode(nodeId)
     val reply = try {
       messageClient
@@ -396,7 +396,7 @@ class DataLayerBridge(private val context: Context) {
     }
     return try {
       val json = org.json.JSONObject(String(reply, Charsets.UTF_8))
-      CounterpartStatusDto(
+      CounterpartVitalsDto(
         batteryPercent = json.optLong("battery", -1L),
         isCharging = json.optBoolean("charging", false),
         model = json.optString("model", "unknown"),

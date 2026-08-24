@@ -18,6 +18,23 @@ Working prototype.
 * watchOS: `WearerLinkWatch` Swift package for native watch apps
   (activate/send/sync/transfer/wake, startup event buffering).
 
+## 0.8.0
+
+API review pass (pre-1.0 breaking renames, no deprecation shims since the
+package is unpublished):
+
+* `getCounterpartStatus()` -> `getCounterpartVitals()` and
+  `WearerCounterpartStatus` -> `WearerCounterpartVitals` — the old name
+  collided with `getCompanionStatus` (pairing state) while meaning
+  something different. watchOS: `requestPhoneStatus` ->
+  `requestPhoneVitals`. Wire path (`/__wlstatus`) unchanged.
+* Store plumbing (`storeSync` etc.) no longer leaks as public members of
+  `WearerLink` (moved to a private transport adapter).
+* Internal plumbing members (`WearerStream.addData`/`markClosed`,
+  `.internal` constructors, `fromDto` mappers) annotated `@internal`.
+* `public_member_api_docs` enforced permanently; every public symbol is
+  documented.
+
 ## 0.7.0
 
 M8: trust & media.

@@ -257,8 +257,8 @@ The simulator-untestable behaviors, tracked as a table in this file:
 
 - M6–M8 shipped; hardware matrix has no ⬜ in at least one full platform
   column per row (or a documented waiver).
-- API review pass: naming consistency sweep, `@Deprecated` shims removed,
-  dartdoc coverage on every public symbol.
+- ~~API review pass: naming consistency sweep, `@Deprecated` shims removed,
+  dartdoc coverage on every public symbol.~~ ✅ done in 0.8.0.
 - pub.dev publish (dry-run already at 0 warnings) + example app polished
   as the reference implementation.
 - Versioning promise documented: semver, wire-compat guarantees between

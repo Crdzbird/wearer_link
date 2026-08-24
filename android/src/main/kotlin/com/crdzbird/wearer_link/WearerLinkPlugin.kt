@@ -153,11 +153,11 @@ class WearerLinkPlugin : FlutterPlugin, WearerLinkHostApi {
     launchWith(callback) { it.getNodes() }
   }
 
-  override fun getCounterpartStatus(
+  override fun getCounterpartVitals(
     nodeId: String?,
-    callback: (Result<CounterpartStatusDto>) -> Unit,
+    callback: (Result<CounterpartVitalsDto>) -> Unit,
   ) {
-    launchWith(callback) { it.getCounterpartStatus(nodeId) }
+    launchWith(callback) { it.getCounterpartVitals(nodeId) }
   }
 
   override fun transferFile(

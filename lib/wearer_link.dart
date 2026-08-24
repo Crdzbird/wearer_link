@@ -29,7 +29,7 @@ export 'src/transfer.dart';
 /// The same API runs inside a phone app and inside a Wear OS Flutter app —
 /// the Android Data Layer is symmetric. On iOS the watch side is a native
 /// Swift companion (see `watchos/` in this package).
-class WearerLink implements StoreTransport {
+class WearerLink {
   WearerLink._(this._host) {
     _flutterApi = _WearerLinkFlutterApiImpl(this);
     WearerLinkFlutterApi.setUp(_flutterApi);
@@ -40,6 +40,7 @@ class WearerLink implements StoreTransport {
 
   static WearerLink? _instance;
 
+  /// The app-wide link to the counterpart device.
   static WearerLink get instance => _instance ??= WearerLink._(
         WearerLinkHostApi(),
       );
@@ -144,29 +145,8 @@ class WearerLink implements StoreTransport {
   /// [WearerStore].
   WearerStore get store {
     _scheduleDrain();
-    return _store ??= WearerStore.internal(this);
+    return _store ??= WearerStore.internal(_StoreTransport(this));
   }
-
-  @override
-  Future<void> storeSync(String path, Uint8List payload) async =>
-      _guard(() async =>
-          _host.syncData(path, await _encryptOut(path, payload)));
-
-  @override
-  Future<Uint8List?> storeReadOwn(String path) => _guard(() async {
-        final raw = await _host.readOwnSyncData(path);
-        return raw == null ? null : _decryptIn(path, raw);
-      });
-
-  @override
-  Future<Uint8List?> storeReadTheirs(String path) => _guard(() async {
-        final raw = await _host.readSyncData(path);
-        return raw == null ? null : _decryptIn(path, raw);
-      });
-
-  @override
-  Future<List<String>> storeListPaths(String prefix) =>
-      _guard(() => _host.listSyncPaths(prefix));
 
   /// Print every send/dispatch via [debugPrint] — field-debugging aid.
   static bool verboseLogging = false;
@@ -294,7 +274,7 @@ class WearerLink implements StoreTransport {
   /// status responder (no app code involved on the other side).
   Future<Duration> pingLatency({String? nodeId}) async {
     final stopwatch = Stopwatch()..start();
-    await getCounterpartStatus(nodeId: nodeId);
+    await getCounterpartVitals(nodeId: nodeId);
     return stopwatch.elapsed;
   }
 
@@ -638,10 +618,10 @@ class WearerLink implements StoreTransport {
   /// The counterpart device's vitals (battery, model, OS), answered by a
   /// built-in responder on the other side — no app code needed there.
   /// Requires a reachable counterpart running wearer_link >= 0.5.
-  Future<WearerCounterpartStatus> getCounterpartStatus({String? nodeId}) =>
+  Future<WearerCounterpartVitals> getCounterpartVitals({String? nodeId}) =>
       _guard(
-        () async => WearerCounterpartStatus.fromDto(
-          await _host.getCounterpartStatus(nodeId),
+        () async => WearerCounterpartVitals.fromDto(
+          await _host.getCounterpartVitals(nodeId),
         ),
       );
 
@@ -991,4 +971,34 @@ class _Route {
   }
 
   Future<Uint8List> callRequest(WearerEvent request) => requestHandler!(request);
+}
+
+
+/// Adapts the facade for [WearerStore] without exposing store plumbing as
+/// public members of [WearerLink]; the cipher wraps store records here.
+class _StoreTransport implements StoreTransport {
+  _StoreTransport(this._link);
+
+  final WearerLink _link;
+
+  @override
+  Future<void> storeSync(String path, Uint8List payload) async =>
+      _link._guard(() async =>
+          _link._host.syncData(path, await _link._encryptOut(path, payload)));
+
+  @override
+  Future<Uint8List?> storeReadOwn(String path) => _link._guard(() async {
+        final raw = await _link._host.readOwnSyncData(path);
+        return raw == null ? null : _link._decryptIn(path, raw);
+      });
+
+  @override
+  Future<Uint8List?> storeReadTheirs(String path) => _link._guard(() async {
+        final raw = await _link._host.readSyncData(path);
+        return raw == null ? null : _link._decryptIn(path, raw);
+      });
+
+  @override
+  Future<List<String>> storeListPaths(String prefix) =>
+      _link._guard(() => _link._host.listSyncPaths(prefix));
 }

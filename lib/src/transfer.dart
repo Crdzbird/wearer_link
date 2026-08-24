@@ -1,9 +1,12 @@
 import 'dart:async';
 
+import 'package:meta/meta.dart';
+
 /// A file transfer with observable progress (see
 /// `WearerLink.transferFileTracked`).
 class WearerFileTransfer {
   /// Internal: created by the facade.
+  @internal
   WearerFileTransfer.internal(this.path, this.totalBytes) {
     _done.future.ignore(); // callers may watch only [progress]
   }
@@ -30,12 +33,14 @@ class WearerFileTransfer {
   Future<void> get done => _done.future;
 
   /// Internal: record [count] more accepted bytes.
+  @internal
   void addSent(int count) {
     _sentBytes += count;
     if (!_progress.isClosed) _progress.add(fraction);
   }
 
   /// Internal: finish (null = success).
+  @internal
   void finish([Object? error]) {
     if (_done.isCompleted) return;
     if (error == null) {
@@ -50,6 +55,7 @@ class WearerFileTransfer {
 
 /// A snapshot of this session's traffic counters (see `WearerLink.stats`).
 class WearerStats {
+  /// Creates a snapshot (produced by the plugin).
   const WearerStats({
     required this.sentEvents,
     required this.receivedEvents,
@@ -81,20 +87,34 @@ class WearerStats {
 }
 
 /// Severity of a [WearerDiagnostic].
-enum WearerDiagnosticSeverity { info, warning, error }
+enum WearerDiagnosticSeverity {
+  /// Informational; no action needed.
+  info,
+
+  /// Unexpected but recovered (e.g. an abnormal stream close).
+  warning,
+
+  /// Something was lost or rejected (e.g. a cipher-mismatch drop).
+  error,
+}
 
 /// An observable plugin-internal event that would otherwise die silently
 /// (see `WearerLink.diagnostics`).
 class WearerDiagnostic {
+  /// Creates a diagnostic stamped with the current time.
   WearerDiagnostic(this.severity, this.area, this.message)
       : timestamp = DateTime.now();
 
+  /// How bad it is.
   final WearerDiagnosticSeverity severity;
 
   /// Subsystem tag, e.g. `stream`, `request`, `replay`, `launch`.
   final String area;
 
+  /// Human-readable description.
   final String message;
+
+  /// When it happened.
   final DateTime timestamp;
 
   @override

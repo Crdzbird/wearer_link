@@ -281,11 +281,11 @@ extension WearerLinkPlugin: WearerLinkHostApi {
     completion(.success(bridge.getNodes()))
   }
 
-  func getCounterpartStatus(
+  func getCounterpartVitals(
     nodeId: String?,
-    completion: @escaping (Result<CounterpartStatusDto, Error>) -> Void
+    completion: @escaping (Result<CounterpartVitalsDto, Error>) -> Void
   ) {
-    bridge.getCounterpartStatus(completion: completion)
+    bridge.getCounterpartVitals(completion: completion)
   }
 
   /// iOS can only launch the watch app for a HealthKit workout session —

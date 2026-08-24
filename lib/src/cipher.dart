@@ -17,6 +17,7 @@ import 'dart:typed_data';
 /// drops them with a diagnostic instead of emitting ciphertext, and a
 /// ciphered endpoint drops unmarked plaintext the same way.
 class WearerCipher {
+  /// Creates a cipher from the app's [encrypt]/[decrypt] callables.
   const WearerCipher({required this.encrypt, required this.decrypt});
 
   /// Encrypt [bytes] leaving this device on [path].

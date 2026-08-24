@@ -426,8 +426,8 @@ class WearerNodeDto {
 
 /// The counterpart device's vitals, served by a built-in handler on the
 /// other side — works even before the counterpart app registers anything.
-class CounterpartStatusDto {
-  CounterpartStatusDto({
+class CounterpartVitalsDto {
+  CounterpartVitalsDto({
     required this.batteryPercent,
     required this.isCharging,
     required this.model,
@@ -455,9 +455,9 @@ class CounterpartStatusDto {
   Object encode() {
     return _toList();  }
 
-  static CounterpartStatusDto decode(Object result) {
+  static CounterpartVitalsDto decode(Object result) {
     result as List<Object?>;
-    return CounterpartStatusDto(
+    return CounterpartVitalsDto(
       batteryPercent: result[0]! as int,
       isCharging: result[1]! as bool,
       model: result[2]! as String,
@@ -468,7 +468,7 @@ class CounterpartStatusDto {
   @override
   // ignore: avoid_equals_and_hash_code_on_mutable_classes
   bool operator ==(Object other) {
-    if (other is! CounterpartStatusDto || other.runtimeType != runtimeType) {
+    if (other is! CounterpartVitalsDto || other.runtimeType != runtimeType) {
       return false;
     }
     if (identical(this, other)) {
@@ -511,7 +511,7 @@ class _PigeonCodec extends StandardMessageCodec {
     }    else if (value is WearerNodeDto) {
       buffer.putUint8(135);
       writeValue(buffer, value.encode());
-    }    else if (value is CounterpartStatusDto) {
+    }    else if (value is CounterpartVitalsDto) {
       buffer.putUint8(136);
       writeValue(buffer, value.encode());
     } else {
@@ -540,7 +540,7 @@ class _PigeonCodec extends StandardMessageCodec {
       case 135:
         return WearerNodeDto.decode(readValue(buffer)!);
       case 136:
-        return CounterpartStatusDto.decode(readValue(buffer)!);
+        return CounterpartVitalsDto.decode(readValue(buffer)!);
       default:
         return super.readValueOfType(type, buffer);
     }
@@ -816,8 +816,8 @@ class WearerLinkHostApi {
 
   /// The counterpart's vitals via the built-in '/__wlstatus' responder.
   /// Requires a reachable counterpart running wearer_link >= 0.5.
-  Future<CounterpartStatusDto> getCounterpartStatus(String? nodeId) async {
-    final pigeonVar_channelName = 'dev.flutter.pigeon.wearer_link.WearerLinkHostApi.getCounterpartStatus$pigeonVar_messageChannelSuffix';
+  Future<CounterpartVitalsDto> getCounterpartVitals(String? nodeId) async {
+    final pigeonVar_channelName = 'dev.flutter.pigeon.wearer_link.WearerLinkHostApi.getCounterpartVitals$pigeonVar_messageChannelSuffix';
     final pigeonVar_channel = BasicMessageChannel<Object?>(
       pigeonVar_channelName,
       pigeonChannelCodec,
@@ -832,7 +832,7 @@ class WearerLinkHostApi {
         isNullValid: false,
     )
     ;
-    return pigeonVar_replyValue! as CounterpartStatusDto;
+    return pigeonVar_replyValue! as CounterpartVitalsDto;
   }
 
   /// Drain events persisted while the app was dead. Called by the Dart

@@ -13,7 +13,16 @@ import 'messages.g.dart';
 
 /// Which device a [WearerLinkFake] endpoint pretends to be. Drives the
 /// capability matrix (and nothing else — wire behavior is uniform).
-enum WearerFakePlatform { androidPhone, wearOs, iPhone }
+enum WearerFakePlatform {
+  /// An Android phone: foreground companion launch, no watch-face surfaces.
+  androidPhone,
+
+  /// A Wear OS watch: foreground launch + tile/complication updates.
+  wearOs,
+
+  /// An iPhone: workout-only launch, complication push.
+  iPhone,
+}
 
 /// In-memory two-endpoint harness: everything `WearerLink` does, with no
 /// platform underneath, so both sides of a phone ⇄ watch protocol can be
@@ -415,9 +424,9 @@ class _FakeHost extends WearerLinkHostApi {
       ];
 
   @override
-  Future<CounterpartStatusDto> getCounterpartStatus(String? nodeId) async {
+  Future<CounterpartVitalsDto> getCounterpartVitals(String? nodeId) async {
     _requireReachable();
-    return CounterpartStatusDto(
+    return CounterpartVitalsDto(
       batteryPercent: 80,
       isCharging: false,
       model: 'Fake ${other.platform.name}',

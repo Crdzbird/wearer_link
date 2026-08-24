@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:typed_data';
 
+import 'package:meta/meta.dart';
+
 /// A live bidirectional byte stream to the counterpart device.
 ///
 /// Android carries it over a native ChannelClient channel (socket-like);
@@ -8,6 +10,8 @@ import 'dart:typed_data';
 /// reachable counterpart for its whole lifetime — when the link drops the
 /// stream closes with an error.
 class WearerStream {
+  /// Internal: streams come from `openStream` / `incomingStreams`.
+  @internal
   WearerStream.internal(
     this.id,
     this.path,
@@ -42,6 +46,7 @@ class WearerStream {
   /// torn down abnormally (peer vanished, transport failure).
   Future<void> get done => _done.future;
 
+  /// Whether the stream has ended (orderly or not).
   bool get isClosed => _closed;
 
   /// Send bytes to the counterpart. Chunked internally where the transport
@@ -61,11 +66,13 @@ class WearerStream {
   }
 
   /// Called by the facade when the native side reports data.
+  @internal
   void addData(Uint8List bytes) {
     if (!_closed) _incoming.add(bytes);
   }
 
   /// Called by the facade when the native side reports closure.
+  @internal
   void markClosed(String? error) {
     if (_closed) return;
     _closed = true;

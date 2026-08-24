@@ -238,7 +238,7 @@ class _HomePageState extends State<HomePage> {
                   onPressed: () => _run('status', () async {
                     final nodes = await _link.getNodes();
                     _append('nodes: $nodes');
-                    final status = await _link.getCounterpartStatus();
+                    final status = await _link.getCounterpartVitals();
                     _append('counterpart: $status');
                   }),
                   child: const Text('Status'),

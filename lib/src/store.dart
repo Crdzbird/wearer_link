@@ -3,15 +3,21 @@ import 'dart:convert';
 import 'dart:math';
 import 'dart:typed_data';
 
+import 'package:meta/meta.dart';
+
 /// How the store reaches the sync layer — implemented by `WearerLink` so
 /// payload ciphers wrap store records like any other payload.
 abstract class StoreTransport {
+  /// Sync one record (latest-per-path semantics).
   Future<void> storeSync(String path, Uint8List payload);
 
+  /// This device's last-synced record for [path], or null.
   Future<Uint8List?> storeReadOwn(String path);
 
+  /// The counterpart's last-synced record for [path], or null.
   Future<Uint8List?> storeReadTheirs(String path);
 
+  /// Every stored path under [prefix], both sides combined.
   Future<List<String>> storeListPaths(String prefix);
 }
 
@@ -33,6 +39,7 @@ abstract class StoreTransport {
 /// `transferData`/`transferFile` for bulk bytes.
 class WearerStore {
   /// Internal: obtain via `WearerLink.store`.
+  @internal
   WearerStore.internal(this._transport);
 
   static const _prefix = '/__wlstore/';
@@ -112,6 +119,7 @@ class WearerStore {
 
   /// Internal: an inbound counterpart record (facade routes reserved-path
   /// data events here).
+  @internal
   void onRemoteRecord(String path, Uint8List payload) {
     final key = path.substring(_prefix.length);
     final record = _StoreRecord.decode(payload);

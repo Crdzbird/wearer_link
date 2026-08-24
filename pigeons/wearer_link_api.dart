@@ -174,8 +174,8 @@ class WearerNodeDto {
 
 /// The counterpart device's vitals, served by a built-in handler on the
 /// other side — works even before the counterpart app registers anything.
-class CounterpartStatusDto {
-  CounterpartStatusDto({
+class CounterpartVitalsDto {
+  CounterpartVitalsDto({
     required this.batteryPercent,
     required this.isCharging,
     required this.model,
@@ -263,7 +263,7 @@ abstract class WearerLinkHostApi {
   /// The counterpart's vitals via the built-in '/__wlstatus' responder.
   /// Requires a reachable counterpart running wearer_link >= 0.5.
   @async
-  CounterpartStatusDto getCounterpartStatus(String? nodeId);
+  CounterpartVitalsDto getCounterpartVitals(String? nodeId);
 
   /// Drain events persisted while the app was dead. Called by the Dart
   /// facade on startup; each drained event is also removed from the store.

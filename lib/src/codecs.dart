@@ -4,8 +4,10 @@ import 'dart:typed_data';
 /// Converts typed values to/from the raw payload bytes that cross the
 /// device boundary. Register per type with `WearerLink.registerCodec`.
 abstract class WearerCodec<T> {
+  /// Value -> payload bytes.
   Uint8List encode(T value);
 
+  /// Payload bytes -> value.
   T decode(Uint8List bytes);
 }
 
@@ -15,9 +17,13 @@ abstract class WearerCodec<T> {
 /// [toJson] when given, otherwise the value's own `toJson()` method (the
 /// json_serializable convention).
 class WearerJsonCodec<T> implements WearerCodec<T> {
+  /// Creates the codec; see [fromJson]/[toJson].
   const WearerJsonCodec(this.fromJson, {this.toJson});
 
+  /// Builds a value from a decoded JSON map.
   final T Function(Map<String, Object?> json) fromJson;
+
+  /// Optional explicit serializer; defaults to the value's own `toJson()`.
   final Object? Function(T value)? toJson;
 
   @override

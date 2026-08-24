@@ -479,7 +479,7 @@ public final class WearerLinkWatch: NSObject {
 
   /// The phone's vitals via its built-in responder (battery, model, OS
   /// as a JSON dictionary).
-  public func requestPhoneStatus(
+  public func requestPhoneVitals(
     completion: @escaping (Result<[String: Any], WearerError>) -> Void
   ) {
     let session = WCSession.default

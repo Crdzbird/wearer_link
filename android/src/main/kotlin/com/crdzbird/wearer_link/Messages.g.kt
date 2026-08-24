@@ -516,7 +516,7 @@ data class WearerNodeDto (
  *
  * Generated class from Pigeon that represents data sent in messages.
  */
-data class CounterpartStatusDto (
+data class CounterpartVitalsDto (
   /** 0–100, or -1 when the counterpart could not read it. */
   val batteryPercent: Long,
   val isCharging: Boolean,
@@ -525,12 +525,12 @@ data class CounterpartStatusDto (
 )
  {
   companion object {
-    fun fromList(pigeonVar_list: List<Any?>): CounterpartStatusDto {
+    fun fromList(pigeonVar_list: List<Any?>): CounterpartVitalsDto {
       val batteryPercent = pigeonVar_list[0] as Long
       val isCharging = pigeonVar_list[1] as Boolean
       val model = pigeonVar_list[2] as String
       val osVersion = pigeonVar_list[3] as String
-      return CounterpartStatusDto(batteryPercent, isCharging, model, osVersion)
+      return CounterpartVitalsDto(batteryPercent, isCharging, model, osVersion)
     }
   }
   fun toList(): List<Any?> {
@@ -548,7 +548,7 @@ data class CounterpartStatusDto (
     if (this === other) {
       return true
     }
-    val other = other as CounterpartStatusDto
+    val other = other as CounterpartVitalsDto
     return MessagesPigeonUtils.deepEquals(this.batteryPercent, other.batteryPercent) && MessagesPigeonUtils.deepEquals(this.isCharging, other.isCharging) && MessagesPigeonUtils.deepEquals(this.model, other.model) && MessagesPigeonUtils.deepEquals(this.osVersion, other.osVersion)
   }
 
@@ -601,7 +601,7 @@ private open class MessagesPigeonCodec : StandardMessageCodec() {
       }
       136.toByte() -> {
         return (readValue(buffer) as? List<Any?>)?.let {
-          CounterpartStatusDto.fromList(it)
+          CounterpartVitalsDto.fromList(it)
         }
       }
       else -> super.readValueOfType(type, buffer)
@@ -637,7 +637,7 @@ private open class MessagesPigeonCodec : StandardMessageCodec() {
         stream.write(135)
         writeValue(stream, value.toList())
       }
-      is CounterpartStatusDto -> {
+      is CounterpartVitalsDto -> {
         stream.write(136)
         writeValue(stream, value.toList())
       }
@@ -717,7 +717,7 @@ interface WearerLinkHostApi {
    * The counterpart's vitals via the built-in '/__wlstatus' responder.
    * Requires a reachable counterpart running wearer_link >= 0.5.
    */
-  fun getCounterpartStatus(nodeId: String?, callback: (Result<CounterpartStatusDto>) -> Unit)
+  fun getCounterpartVitals(nodeId: String?, callback: (Result<CounterpartVitalsDto>) -> Unit)
   /**
    * Drain events persisted while the app was dead. Called by the Dart
    * facade on startup; each drained event is also removed from the store.
@@ -1022,12 +1022,12 @@ interface WearerLinkHostApi {
         }
       }
       run {
-        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.wearer_link.WearerLinkHostApi.getCounterpartStatus$separatedMessageChannelSuffix", codec)
+        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.wearer_link.WearerLinkHostApi.getCounterpartVitals$separatedMessageChannelSuffix", codec)
         if (api != null) {
           channel.setMessageHandler { message, reply ->
             val args = message as List<Any?>
             val nodeIdArg = args[0] as String?
-            api.getCounterpartStatus(nodeIdArg) { result: Result<CounterpartStatusDto> ->
+            api.getCounterpartVitals(nodeIdArg) { result: Result<CounterpartVitalsDto> ->
               val error = result.exceptionOrNull()
               if (error != null) {
                 reply.reply(MessagesPigeonUtils.wrapError(error))

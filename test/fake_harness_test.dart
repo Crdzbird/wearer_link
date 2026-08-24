@@ -1,3 +1,5 @@
+// ignore_for_file: public_member_api_docs
+
 import 'dart:convert';
 import 'dart:io';
 
@@ -348,19 +350,19 @@ void routerAndTypedTests() {
     expect(intents.single.args, {'id': 42});
   });
 
-  test('getNodes and getCounterpartStatus report the fake peer', () async {
+  test('getNodes and getCounterpartVitals report the fake peer', () async {
     final (phone, _) = WearerLinkFake.pair();
     final node = (await phone.getNodes()).single;
     expect(node.id, 'node-b');
     expect(node.isNearby, isTrue);
 
-    final status = await phone.getCounterpartStatus();
+    final status = await phone.getCounterpartVitals();
     expect(status.batteryPercent, 80);
     expect(status.model, contains('wearOs'));
 
     phone.setReachable(false);
     await expectLater(
-      phone.getCounterpartStatus(),
+      phone.getCounterpartVitals(),
       throwsA(
         isA<WearerLinkException>()
             .having((e) => e.code, 'code', WearerErrorCode.unreachable),

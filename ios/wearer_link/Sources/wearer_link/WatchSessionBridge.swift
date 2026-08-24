@@ -227,7 +227,7 @@ final class WatchSessionBridge: NSObject {
   }
 
   /// Ask the watch's built-in /__wlstatus responder for its vitals.
-  func getCounterpartStatus(completion: @escaping (Result<CounterpartStatusDto, Error>) -> Void) {
+  func getCounterpartVitals(completion: @escaping (Result<CounterpartVitalsDto, Error>) -> Void) {
     let session = WCSession.default
     guard session.activationState == .activated, session.isReachable else {
       completion(.failure(PigeonError(
@@ -250,7 +250,7 @@ final class WatchSessionBridge: NSObject {
               details: nil)))
             return
           }
-          completion(.success(CounterpartStatusDto(
+          completion(.success(CounterpartVitalsDto(
             batteryPercent: Int64(json["battery"] as? Int ?? -1),
             isCharging: json["charging"] as? Bool ?? false,
             model: json["model"] as? String ?? "unknown",

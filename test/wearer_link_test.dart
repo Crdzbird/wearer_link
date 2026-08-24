@@ -1,3 +1,5 @@
+// ignore_for_file: public_member_api_docs
+
 import 'dart:async';
 import 'dart:convert';
 
@@ -77,8 +79,8 @@ class _FakeHost extends WearerLinkHostApi {
       ];
 
   @override
-  Future<CounterpartStatusDto> getCounterpartStatus(String? nodeId) async =>
-      CounterpartStatusDto(
+  Future<CounterpartVitalsDto> getCounterpartVitals(String? nodeId) async =>
+      CounterpartVitalsDto(
         batteryPercent: 55,
         isCharging: true,
         model: 'Test Watch',
