@@ -18,6 +18,14 @@ Working prototype.
 * watchOS: `WearerLinkWatch` Swift package for native watch apps
   (activate/send/sync/transfer/wake, startup event buffering).
 
+## 0.5.0 (in progress)
+
+* `package:wearer_link/testing.dart`: `WearerLinkFake.pair()` — in-memory
+  two-endpoint harness reproducing the full delivery contract
+  (reachability, kill/relaunch replay, background handler + ack, streams,
+  delivery toggle, per-platform capabilities). The plugin's own suite runs
+  12 tests on it.
+
 ## 0.4.0
 
 * Bidirectional streaming: `openStream` / `incomingStreams` /

@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'dart:ui';
 
 import 'package:flutter/services.dart';
+import 'package:meta/meta.dart';
+
 
 import 'src/background.dart';
 import 'src/messages.g.dart';
@@ -35,8 +37,15 @@ class WearerLink {
 
   final WearerLinkHostApi _host;
   // Kept so the registered FlutterApi handler isn't GC'd behind our back.
-  // ignore: unused_field
   _WearerLinkFlutterApiImpl? _flutterApi;
+
+  /// Test seam: the native->Dart receiver this instance routes events
+  /// through. Production wires it to the platform channel; fakes (see
+  /// `package:wearer_link/testing.dart`) call it directly so injected
+  /// events exercise the real dispatch/dedup/stream machinery.
+  @visibleForTesting
+  WearerLinkFlutterApi get debugFlutterApi =>
+      _flutterApi ??= _WearerLinkFlutterApiImpl(this);
 
   final _streams = <String, WearerStream>{};
   final _incomingStreams = StreamController<WearerStream>.broadcast();

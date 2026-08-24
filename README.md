@@ -211,6 +211,30 @@ needed. On the native watch, use
 - Each call throws `WearerErrorCode.unsupported` on the platform that
   forbids it — OS policy, not a plugin gap.
 
+## Testing your app
+
+`package:wearer_link/testing.dart` ships an in-memory two-endpoint harness
+so both sides of your protocol run in plain Dart unit tests — no emulators:
+
+```dart
+import 'package:wearer_link/testing.dart';
+
+final (phone, watch) = WearerLinkFake.pair();   // linked, reachable
+watch.messages.listen(...);
+await phone.sendMessage('/ping', payload);
+
+phone.setReachable(false);        // range loss: sends fail, transfers queue
+watch.simulateKill();             // killed app: events queue, background
+final next = watch.relaunch();    //   handler runs; relaunch replays with
+                                  //   deliveredWhileDead: true
+```
+
+Everything works on the fake: messaging, RPC, sync read/delete, files,
+streams (incl. teardown on link loss), the delivery toggle, capability
+matrices per simulated platform, and the pending-queue lifecycle. Injected
+events run through the plugin's production dispatch code — the plugin's own
+test suite runs on the same harness.
+
 ## Development
 
 ```sh

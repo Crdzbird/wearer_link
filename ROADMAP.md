@@ -31,7 +31,7 @@ tests + at least one live pair check per feature).
 The milestone that makes the library pleasant on day one. All items are
 small-to-medium and independent; ship together as 0.5.0.
 
-### 6.1 In-memory test harness — `WearerLinkFake`
+### 6.1 In-memory test harness — `WearerLinkFake` ✅ shipped
 
 The single biggest adoption lever: app developers can unit test both sides
 of their protocol with zero hardware.
