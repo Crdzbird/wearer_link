@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'dart:typed_data' show BytesBuilder;
+
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:wearer_link/testing.dart';
@@ -19,6 +21,8 @@ void main() {
   routerAndTypedTests();
   storeTests();
   transferAndDiagnosticsTests();
+  cipherTests();
+  audioStreamingTests();
 
   test('pair delivers messages both ways', () async {
     final (phone, watch) = WearerLinkFake.pair();
@@ -566,5 +570,138 @@ void transferAndDiagnosticsTests() {
     final rtt = await phone.pingLatency();
     expect(rtt, greaterThanOrEqualTo(Duration.zero));
     expect(rtt, lessThan(const Duration(seconds: 1)));
+  });
+}
+
+// ---- M8.1: payload cipher --------------------------------------------------
+
+WearerCipher xorCipher([int key = 0x5A]) => WearerCipher(
+      encrypt: (path, bytes) async =>
+          Uint8List.fromList([for (final b in bytes) b ^ key]),
+      decrypt: (path, bytes) async =>
+          Uint8List.fromList([for (final b in bytes) b ^ key]),
+    );
+
+void cipherTests() {
+  test('cipher: message/request/store round trips stay intact', () async {
+    final (phone, watch) = WearerLinkFake.pair();
+    phone.setPayloadCipher(xorCipher());
+    watch.setPayloadCipher(xorCipher());
+
+    final messages = <String>[];
+    watch.messages.listen((e) => messages.add(utf8.decode(e.payload)));
+    watch.setRequestHandler(
+      (req) async => _bytes(utf8.decode(req.payload).toUpperCase()),
+    );
+    await pumpEventQueue();
+
+    await phone.sendMessage('/m', _bytes('secret'));
+    await pumpEventQueue();
+    expect(messages, ['secret']);
+
+    final reply = await phone.sendRequest('/echo', _bytes('classified'));
+    expect(utf8.decode(reply), 'CLASSIFIED');
+
+    await phone.store.set('k', _bytes('sealed'));
+    await pumpEventQueue();
+    expect(utf8.decode((await watch.store.get('k'))!), 'sealed');
+  });
+
+  test('cipher: streams and tracked transfers stay intact', () async {
+    final (phone, watch) = WearerLinkFake.pair();
+    phone.setPayloadCipher(xorCipher());
+    watch.setPayloadCipher(xorCipher());
+
+    final files = <WearerEvent>[];
+    watch.fileEvents.listen(files.add);
+    watch.incomingStreams.listen((stream) {
+      stream.data.listen((chunk) => stream.send(chunk)); // echo
+    });
+    await pumpEventQueue();
+
+    final stream = await phone.openStream('/live');
+    final echoed = <String>[];
+    stream.data.listen((chunk) => echoed.add(utf8.decode(chunk)));
+    await stream.send(_bytes('frame'));
+    await pumpEventQueue();
+    expect(echoed, ['frame']);
+    await stream.close();
+
+    final source = File('${Directory.systemTemp.path}/wearer_sealed.bin')
+      ..writeAsBytesSync(List.generate(70 * 1024, (i) => (i * 7) % 256));
+    final transfer = await phone.transferFileTracked('/sealed', source.path);
+    await transfer.done;
+    await pumpEventQueue();
+    expect(
+      File(files.single.filePath!).readAsBytesSync(),
+      source.readAsBytesSync(),
+    );
+  });
+
+  test('cipher mismatch drops payloads with diagnostics, requests fail typed',
+      () async {
+    final (phone, watch) = WearerLinkFake.pair();
+    phone.setPayloadCipher(xorCipher());
+    // watch has NO cipher.
+
+    final received = <WearerEvent>[];
+    final watchDiagnostics = <WearerDiagnostic>[];
+    watch.messages.listen(received.add);
+    watch.diagnostics.listen(watchDiagnostics.add);
+    watch.setRequestHandler((req) async => _bytes('plain reply'));
+    await pumpEventQueue();
+
+    // Encrypted -> cipher-less endpoint: dropped, never garbage.
+    await phone.sendMessage('/m', _bytes('sealed'));
+    await pumpEventQueue();
+    expect(received, isEmpty);
+    expect(watchDiagnostics.single.area, 'cipher');
+
+    // Plaintext -> ciphered endpoint: dropped too.
+    final phoneDiagnostics = <WearerDiagnostic>[];
+    final atPhone = <WearerEvent>[];
+    phone.messages.listen(atPhone.add);
+    phone.diagnostics.listen(phoneDiagnostics.add);
+    await pumpEventQueue();
+    await watch.sendMessage('/m', _bytes('plain'));
+    await pumpEventQueue();
+    expect(atPhone, isEmpty);
+    expect(phoneDiagnostics.single.area, 'cipher');
+
+    // Ciphered request to a cipher-less responder: typed failure.
+    await expectLater(
+      phone.sendRequest('/echo', _bytes('x')),
+      throwsA(isA<WearerLinkException>()),
+    );
+  });
+}
+
+// ---- M8.2: audio-profile streaming (ordering + integrity under load) ------
+
+void audioStreamingTests() {
+  test('stream sustains many audio-sized chunks in order', () async {
+    final (phone, watch) = WearerLinkFake.pair();
+    final received = BytesBuilder(copy: false);
+    watch.incomingStreams.listen((stream) {
+      stream.data.listen(received.add);
+    });
+    await pumpEventQueue();
+
+    // ~1.6MB as 100 x 16KB chunks — a few seconds of PCM audio.
+    final stream = await phone.openStream('/voice');
+    final sent = BytesBuilder(copy: false);
+    for (var i = 0; i < 100; i++) {
+      final chunk = Uint8List.fromList(
+        List.generate(16 * 1024, (j) => (i + j) % 256),
+      );
+      sent.add(chunk);
+      await stream.send(chunk);
+    }
+    await pumpEventQueue();
+    await stream.close();
+
+    expect(received.length, 100 * 16 * 1024);
+    expect(received.takeBytes(), sent.takeBytes(),
+        reason: 'chunks must arrive complete and in order');
   });
 }

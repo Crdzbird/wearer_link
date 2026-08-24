@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 
 
 import 'src/background.dart';
+import 'src/cipher.dart';
 import 'src/codecs.dart';
 import 'src/messages.g.dart';
 import 'src/models.dart';
@@ -16,6 +17,7 @@ import 'src/stream.dart';
 import 'src/transfer.dart';
 
 export 'src/background.dart' show WearerBackgroundHandler;
+export 'src/cipher.dart';
 export 'src/codecs.dart';
 export 'src/models.dart';
 export 'src/store.dart' show WearerStore;
@@ -27,7 +29,7 @@ export 'src/transfer.dart';
 /// The same API runs inside a phone app and inside a Wear OS Flutter app —
 /// the Android Data Layer is symmetric. On iOS the watch side is a native
 /// Swift companion (see `watchos/` in this package).
-class WearerLink {
+class WearerLink implements StoreTransport {
   WearerLink._(this._host) {
     _flutterApi = _WearerLinkFlutterApiImpl(this);
     WearerLinkFlutterApi.setUp(_flutterApi);
@@ -73,13 +75,98 @@ class WearerLink {
 
   WearerStore? _store;
 
+  WearerCipher? _cipher;
+
+  /// Marker prefixed to encrypted payloads so mismatched endpoints fail
+  /// loudly instead of emitting ciphertext. Reserved: unencrypted app
+  /// payloads must not start with these bytes.
+  static const _cipherMagic = [0x57, 0x4C, 0x45, 0x01]; // "WLE\x01"
+
+  /// Install (or clear, with null) the app-supplied payload cipher. See
+  /// [WearerCipher] for exactly which bytes it covers.
+  void setPayloadCipher(WearerCipher? cipher) => _cipher = cipher;
+
+  Future<Uint8List> _encryptOut(String path, Uint8List bytes) async {
+    final cipher = _cipher;
+    if (cipher == null || bytes.isEmpty || _cipherExempt(path)) return bytes;
+    final sealed = await cipher.encrypt(path, bytes);
+    return Uint8List.fromList([..._cipherMagic, ...sealed]);
+  }
+
+  /// Returns null when the payload must be dropped (cipher mismatch or
+  /// failed decryption) — a diagnostic is emitted either way.
+  Future<Uint8List?> _decryptIn(String path, Uint8List bytes) async {
+    if (bytes.isEmpty || _cipherExempt(path)) return bytes;
+    final marked = bytes.length >= _cipherMagic.length &&
+        bytes[0] == _cipherMagic[0] &&
+        bytes[1] == _cipherMagic[1] &&
+        bytes[2] == _cipherMagic[2] &&
+        bytes[3] == _cipherMagic[3];
+    final cipher = _cipher;
+    if (cipher == null) {
+      if (!marked) return bytes;
+      _diagnose(
+        WearerDiagnosticSeverity.error,
+        'cipher',
+        'dropped encrypted payload on $path — no cipher installed here',
+      );
+      return null;
+    }
+    if (!marked) {
+      _diagnose(
+        WearerDiagnosticSeverity.error,
+        'cipher',
+        'dropped plaintext payload on $path — this endpoint requires '
+            'encryption',
+      );
+      return null;
+    }
+    try {
+      return await cipher.decrypt(
+        path,
+        Uint8List.sublistView(bytes, _cipherMagic.length),
+      );
+    } catch (e) {
+      _diagnose(
+        WearerDiagnosticSeverity.error,
+        'cipher',
+        'decryption failed on $path: $e',
+      );
+      return null;
+    }
+  }
+
+  static bool _cipherExempt(String path) =>
+      path == '/__wllaunch' || path == '/__wlstatus';
+
   /// The synced key-value store: both sides read/write the same keys,
   /// newest write wins, values persist in the OS sync layer. See
   /// [WearerStore].
   WearerStore get store {
     _scheduleDrain();
-    return _store ??= WearerStore.internal(_host);
+    return _store ??= WearerStore.internal(this);
   }
+
+  @override
+  Future<void> storeSync(String path, Uint8List payload) async =>
+      _guard(() async =>
+          _host.syncData(path, await _encryptOut(path, payload)));
+
+  @override
+  Future<Uint8List?> storeReadOwn(String path) => _guard(() async {
+        final raw = await _host.readOwnSyncData(path);
+        return raw == null ? null : _decryptIn(path, raw);
+      });
+
+  @override
+  Future<Uint8List?> storeReadTheirs(String path) => _guard(() async {
+        final raw = await _host.readSyncData(path);
+        return raw == null ? null : _decryptIn(path, raw);
+      });
+
+  @override
+  Future<List<String>> storeListPaths(String prefix) =>
+      _guard(() => _host.listSyncPaths(prefix));
 
   /// Print every send/dispatch via [debugPrint] — field-debugging aid.
   static bool verboseLogging = false;
@@ -132,7 +219,7 @@ class WearerLink {
         // peer node id; fall back to registering here if it hasn't.
         return _streams.putIfAbsent(
           id,
-          () => WearerStream.internal(id, path, nodeId ?? '', _host),
+          () => _newStream(id, path, nodeId ?? ''),
         );
       });
 
@@ -263,7 +350,13 @@ class WearerLink {
       debugPrint('wearer_link -> message $path (${payload.length}B)');
     }
     try {
-      await _guard(() => _host.sendMessage(path, payload, nodeId));
+      await _guard(
+        () async => _host.sendMessage(
+          path,
+          await _encryptOut(path, payload),
+          nodeId,
+        ),
+      );
     } on WearerLinkException catch (e) {
       if (!queueIfUnreachable || e.code != WearerErrorCode.unreachable) {
         rethrow;
@@ -284,15 +377,24 @@ class WearerLink {
     String? nodeId,
     Duration timeout = const Duration(seconds: 10),
   }) =>
-      _guard(
-        () => _host.sendRequest(path, payload, nodeId).timeout(
+      _guard(() async {
+        final sealed = await _encryptOut(path, payload);
+        final reply = await _host.sendRequest(path, sealed, nodeId).timeout(
               timeout,
               onTimeout: () => throw WearerLinkException(
                 WearerErrorCode.sendFailed,
                 'No reply within $timeout for $path',
               ),
-            ),
-      );
+            );
+        final clear = await _decryptIn(path, reply);
+        if (clear == null) {
+          throw const WearerLinkException(
+            WearerErrorCode.unsupported,
+            'Reply dropped: payload cipher mismatch with the counterpart',
+          );
+        }
+        return clear;
+      });
 
   /// Answer [sendRequest] calls from the counterpart. The handler's returned
   /// bytes travel back as the reply; a thrown error rejects the request on
@@ -313,13 +415,17 @@ class WearerLink {
   /// item / iOS `updateApplicationContext`).
   Future<void> syncData(String path, Uint8List payload) {
     _sentEvents++;
-    return _guard(() => _host.syncData(path, payload));
+    return _guard(
+      () async => _host.syncData(path, await _encryptOut(path, payload)),
+    );
   }
 
   /// Latest value the counterpart synced for [path] — the current state
   /// behind [dataEvents] — or null if it never synced one.
-  Future<Uint8List?> readSyncData(String path) =>
-      _guard(() => _host.readSyncData(path));
+  Future<Uint8List?> readSyncData(String path) => _guard(() async {
+        final raw = await _host.readSyncData(path);
+        return raw == null ? null : _decryptIn(path, raw);
+      });
 
   /// Remove the value this device synced for [path]. The counterpart's own
   /// synced value is theirs to delete.
@@ -331,7 +437,9 @@ class WearerLink {
   /// `DataClient` item / iOS `transferUserInfo`).
   Future<void> transferData(String path, Uint8List payload) {
     _sentEvents++;
-    return _guard(() => _host.transferData(path, payload));
+    return _guard(
+      () async => _host.transferData(path, await _encryptOut(path, payload)),
+    );
   }
 
   /// Transfer the file at [filePath] to the counterpart, which receives it
@@ -569,7 +677,29 @@ class WearerLink {
     _diagnostics.add(diagnostic);
   }
 
+  /// Serializes async (possibly ciphered) dispatch so event order is
+  /// preserved end to end.
+  Future<void> _dispatchChain = Future.value();
+
   void _dispatch(WearerEventDto dto) {
+    _dispatchChain = _dispatchChain.then((_) => _dispatchAsync(dto));
+  }
+
+  Future<void> _dispatchAsync(WearerEventDto dto) async {
+    if (dto.payload.isNotEmpty) {
+      final clear = await _decryptIn(dto.path, dto.payload);
+      if (clear == null) return; // dropped: cipher mismatch
+      dto = WearerEventDto(
+        id: dto.id,
+        kind: dto.kind,
+        path: dto.path,
+        payload: clear,
+        sourceNodeId: dto.sourceNodeId,
+        timestampMillis: dto.timestampMillis,
+        deliveredWhileDead: dto.deliveredWhileDead,
+        filePath: dto.filePath,
+      );
+    }
     if (!_seenIds.add(dto.id)) {
       _dedupDropped++;
       return; // duplicate replay/live race
@@ -606,6 +736,18 @@ class WearerLink {
         _fileEvents.add(event);
     }
   }
+
+  WearerStream _newStream(String id, String path, String peer) =>
+      WearerStream.internal(
+        id,
+        path,
+        peer,
+        (streamId, bytes) async => _host.sendStreamData(
+          streamId,
+          await _encryptOut(path, bytes),
+        ),
+        (streamId) => _host.closeStream(streamId),
+      );
 
   /// Receive one inbound tracked file: header frame, then raw chunks; a
   /// clean close completes the file and emits a file event.
@@ -710,19 +852,36 @@ class _WearerLinkFlutterApiImpl implements WearerLinkFlutterApi {
   void onMessage(WearerEventDto event) => _link._dispatch(event);
 
   @override
-  Future<Uint8List> onRequest(WearerEventDto event) {
-    final request = WearerEvent.fromDto(event);
-    final route = _Route.bestMatch(_link._requestRoutes, request.path);
-    if (route != null) return route.callRequest(request);
-    final handler = _link._requestHandler;
-    if (handler == null) {
-      throw PlatformException(
-        code: 'noHandler',
-        message: 'No request handler registered '
-            '(setRequestHandler / onRequestPath).',
+  Future<Uint8List> onRequest(WearerEventDto event) async {
+    var request = WearerEvent.fromDto(event);
+    if (request.payload.isNotEmpty) {
+      final clear = await _link._decryptIn(request.path, request.payload);
+      if (clear == null) {
+        throw PlatformException(
+          code: 'unsupported',
+          message: 'Request dropped: payload cipher mismatch.',
+        );
+      }
+      request = WearerEvent(
+        id: request.id,
+        kind: request.kind,
+        path: request.path,
+        payload: clear,
+        sourceNodeId: request.sourceNodeId,
+        timestamp: request.timestamp,
+        deliveredWhileDead: request.deliveredWhileDead,
       );
     }
-    return handler(request);
+    final route = _Route.bestMatch(_link._requestRoutes, request.path);
+    final handler = route != null
+        ? route.callRequest
+        : _link._requestHandler ??
+            (throw PlatformException(
+              code: 'noHandler',
+              message: 'No request handler registered '
+                  '(setRequestHandler / onRequestPath).',
+            ));
+    return _link._encryptOut(request.path, await handler(request));
   }
 
   @override
@@ -744,7 +903,7 @@ class _WearerLinkFlutterApiImpl implements WearerLinkFlutterApi {
   ) {
     final stream = _link._streams.putIfAbsent(
       streamId,
-      () => WearerStream.internal(streamId, path, sourceNodeId, _link._host),
+      () => _link._newStream(streamId, path, sourceNodeId),
     );
     if (!incoming) return;
     if (path == '/__wlfile') {
@@ -756,12 +915,28 @@ class _WearerLinkFlutterApiImpl implements WearerLinkFlutterApi {
     _link._incomingStreams.add(stream);
   }
 
+  /// Per-stream decrypt chains keep chunk order under async ciphers.
+  final _streamRxChains = <String, Future<void>>{};
+
   @override
-  void onStreamData(String streamId, Uint8List data) =>
-      _link._streams[streamId]?.addData(data);
+  void onStreamData(String streamId, Uint8List data) {
+    final stream = _link._streams[streamId];
+    if (stream == null) return;
+    _streamRxChains[streamId] =
+        (_streamRxChains[streamId] ?? Future.value()).then((_) async {
+      final clear = await _link._decryptIn(stream.path, data);
+      if (clear != null) stream.addData(clear); // null = dropped + diagnosed
+    });
+  }
 
   @override
   void onStreamClosed(String streamId, String? error) {
+    // Let queued chunks land before the stream is marked closed.
+    final chain = _streamRxChains.remove(streamId) ?? Future.value();
+    chain.whenComplete(() => _finishStreamClose(streamId, error));
+  }
+
+  void _finishStreamClose(String streamId, String? error) {
     if (error != null) {
       _link._diagnose(
         WearerDiagnosticSeverity.warning,

@@ -18,6 +18,23 @@ Working prototype.
 * watchOS: `WearerLinkWatch` Swift package for native watch apps
   (activate/send/sync/transfer/wake, startup event buffering).
 
+## 0.7.0
+
+M8: trust & media.
+
+* `setPayloadCipher(WearerCipher)` — app-supplied encryption enforced
+  across messages, requests (both legs), data/blob transfers, store
+  records, and all stream chunks (tracked files included). A 4-byte wire
+  marker makes mismatched endpoints drop payloads with diagnostics and
+  fail requests typed — ciphertext is never emitted as app data.
+  Dispatch and per-stream decrypt chains keep ordering under async
+  ciphers. Exclusions documented: plain transferFile bodies, /__wlstatus,
+  launch args.
+* Audio streaming guarantee: suite sustains 100×16KB ordered chunks over
+  one stream; README voice-memo recipe. (No new API — measurements did
+  not justify a profile knob.)
+* `WearerStream` now takes injected transport hooks (internal refactor).
+
 ## 0.6.0
 
 M7: product surfaces.

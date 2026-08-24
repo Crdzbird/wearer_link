@@ -241,6 +241,48 @@ needed. On the native watch, use
 - Each call throws `WearerErrorCode.unsupported` on the platform that
   forbids it — OS policy, not a plugin gap.
 
+## Encryption
+
+Bring your own cipher; the plugin guarantees which bytes pass through it:
+
+```dart
+wearer.setPayloadCipher(WearerCipher(
+  encrypt: (path, bytes) async => myAead.seal(bytes),
+  decrypt: (path, bytes) async => myAead.open(bytes),
+));
+```
+
+Covered: messages, requests (both legs), data transfers (blob route
+included), store records, and every stream chunk — tracked file transfers
+ride streams, so their bodies are covered. Not covered (documented, not
+silent): plain `transferFile` bodies (read natively), the built-in
+`/__wlstatus` probe, and launch route/args. Mismatched endpoints fail
+loudly: an encrypted payload reaching a cipher-less side (or plaintext
+reaching a ciphered side) is dropped with a `diagnostics` entry, and
+requests fail with a typed error — ciphertext is never emitted as data.
+
+## Streaming audio (recipe)
+
+`WearerStream` sustains ordered audio-sized chunking (the suite pushes
+1.6MB as 100×16KB frames and asserts order + integrity). A watch voice
+memo:
+
+```dart
+// Watch side (Wear OS Flutter — for watchOS use WearerLinkWatch.openStream)
+final stream = await wearer.openStream('/voice');
+micChunks.listen(stream.send);                 // 16–32KB PCM frames
+// Phone side
+wearer.incomingStreams.listen((s) async {
+  if (s.path != '/voice') return;
+  final sink = File(outPath).openWrite();
+  await s.data.forEach(sink.add);
+  await sink.close();                          // arrives in order
+});
+```
+
+Keep frames at or under 32KB; on iOS each frame rides an interactive
+message, so the link must stay reachable for the stream's lifetime.
+
 ## Testing your app
 
 `package:wearer_link/testing.dart` ships an in-memory two-endpoint harness

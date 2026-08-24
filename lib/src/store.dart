@@ -3,7 +3,17 @@ import 'dart:convert';
 import 'dart:math';
 import 'dart:typed_data';
 
-import 'messages.g.dart';
+/// How the store reaches the sync layer — implemented by `WearerLink` so
+/// payload ciphers wrap store records like any other payload.
+abstract class StoreTransport {
+  Future<void> storeSync(String path, Uint8List payload);
+
+  Future<Uint8List?> storeReadOwn(String path);
+
+  Future<Uint8List?> storeReadTheirs(String path);
+
+  Future<List<String>> storeListPaths(String prefix);
+}
 
 /// A reactive key-value store synced between phone and watch.
 ///
@@ -23,12 +33,12 @@ import 'messages.g.dart';
 /// `transferData`/`transferFile` for bulk bytes.
 class WearerStore {
   /// Internal: obtain via `WearerLink.store`.
-  WearerStore.internal(this._host);
+  WearerStore.internal(this._transport);
 
   static const _prefix = '/__wlstore/';
   static const _maxValueBytes = 48 * 1024;
 
-  final WearerLinkHostApi _host;
+  final StoreTransport _transport;
   final String _writerId =
       '${DateTime.now().microsecondsSinceEpoch}-${Random().nextInt(1 << 32)}';
 
@@ -55,7 +65,7 @@ class WearerStore {
       deleted: false,
       value: value,
     );
-    await _host.syncData(_prefix + key, record.encode());
+    await _transport.storeSync(_prefix + key, record.encode());
     _apply(key, record);
   }
 
@@ -68,7 +78,7 @@ class WearerStore {
       deleted: true,
       value: null,
     );
-    await _host.syncData(_prefix + key, record.encode());
+    await _transport.storeSync(_prefix + key, record.encode());
     _apply(key, record);
   }
 
@@ -90,7 +100,7 @@ class WearerStore {
 
   /// Keys currently present (tombstoned keys excluded).
   Future<Set<String>> keys() async {
-    final paths = await _host.listSyncPaths(_prefix);
+    final paths = await _transport.storeListPaths(_prefix);
     final result = <String>{};
     for (final path in paths) {
       final key = path.substring(_prefix.length);
@@ -123,8 +133,10 @@ class WearerStore {
   Future<_StoreRecord?> _resolve(String key) async {
     if (_cachedKeys.contains(key)) return _cache[key];
     // Cold read: merge both sides' persisted records once.
-    final own = _StoreRecord.decode(await _host.readOwnSyncData(_prefix + key));
-    final theirs = _StoreRecord.decode(await _host.readSyncData(_prefix + key));
+    final own =
+        _StoreRecord.decode(await _transport.storeReadOwn(_prefix + key));
+    final theirs =
+        _StoreRecord.decode(await _transport.storeReadTheirs(_prefix + key));
     final winner = switch ((own, theirs)) {
       (null, final t) => t,
       (final o, null) => o,

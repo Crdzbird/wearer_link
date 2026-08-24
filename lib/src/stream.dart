@@ -1,8 +1,6 @@
 import 'dart:async';
 import 'dart:typed_data';
 
-import 'messages.g.dart';
-
 /// A live bidirectional byte stream to the counterpart device.
 ///
 /// Android carries it over a native ChannelClient channel (socket-like);
@@ -10,7 +8,13 @@ import 'messages.g.dart';
 /// reachable counterpart for its whole lifetime — when the link drops the
 /// stream closes with an error.
 class WearerStream {
-  WearerStream.internal(this.id, this.path, this.peerNodeId, this._host) {
+  WearerStream.internal(
+    this.id,
+    this.path,
+    this.peerNodeId,
+    this._send,
+    this._close,
+  ) {
     // An abnormal close must not crash apps that never await [done].
     _done.future.ignore();
   }
@@ -24,7 +28,8 @@ class WearerStream {
   /// Node id of the other end.
   final String peerNodeId;
 
-  final WearerLinkHostApi _host;
+  final Future<void> Function(String id, Uint8List bytes) _send;
+  final Future<void> Function(String id) _close;
 
   final _incoming = StreamController<Uint8List>();
   final _done = Completer<void>();
@@ -45,13 +50,13 @@ class WearerStream {
     if (_closed) {
       throw StateError('WearerStream($path) is closed');
     }
-    return _host.sendStreamData(id, bytes);
+    return _send(id, bytes);
   }
 
   /// Close both directions. Idempotent.
   Future<void> close() async {
     if (_closed) return;
-    await _host.closeStream(id);
+    await _close(id);
     // onStreamClosed finishes the bookkeeping; nothing else to do here.
   }
 

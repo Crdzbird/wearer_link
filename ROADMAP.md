@@ -204,7 +204,7 @@ tests; CI green.
 
 ## M8 — Trust & media (v0.7.0)
 
-### 8.1 App-layer encryption hook
+### 8.1 App-layer encryption hook ✅ shipped
 
 ```dart
 wearer.setPayloadCipher(WearerCipher(
@@ -221,7 +221,7 @@ wearer.setPayloadCipher(WearerCipher(
   emits garbage.
 - Effort: S–M (the discipline is auditing every path, not the code).
 
-### 8.2 Audio / sensor stream helpers
+### 8.2 Audio / sensor stream helpers ✅ shipped (recipe + ordering guarantee; no profile knob — measurements did not justify one)
 
 ```dart
 final mic = await wearer.openStream('/voice', profile: WearerStreamProfile.audio);
