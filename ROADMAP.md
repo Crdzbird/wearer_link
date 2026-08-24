@@ -248,11 +248,16 @@ The simulator-untestable behaviors, tracked as a table in this file:
 | Launch-with-intent foreground open | ✅ 0.8.1 (foreground + route/args) | n/a (workout-only) |
 | Complication push budget behavior | n/a | ⬜ |
 | Counterpart vitals on hardware | ✅ 0.8.1 (real battery/charging) | ⬜ (sim-verified) |
-| Tile/complication surface update | ⬜ needs app with tile | n/a |
+| Tile/complication surface update | ✅ 0.8.2 (DemoTileService re-rendered in ~1s showing fresh store state) | n/a |
 | Store conflict under real latency | ✅ 0.8.1 (LWW converged to later writer) | ⬜ |
 | Tracked transfer progress on hardware | ✅ 0.8.1 (2MB md5-identical, framed header) | n/a (native watch) |
 
 ---
+
+**iOS physical column: waived** (2026-08-24, user decision) — pending real
+iPhone + Apple Watch hardware. The iOS implementations are sim-verified
+where the simulator permits; rows marked ⬜ in the iOS column are release
+waivers, not unknown-unknowns.
 
 ## 1.0 criteria
 
@@ -260,10 +265,10 @@ The simulator-untestable behaviors, tracked as a table in this file:
   column per row (or a documented waiver).
 - ~~API review pass: naming consistency sweep, `@Deprecated` shims removed,
   dartdoc coverage on every public symbol.~~ ✅ done in 0.8.0.
-- pub.dev publish (dry-run already at 0 warnings) + example app polished
-  as the reference implementation.
-- Versioning promise documented: semver, wire-compat guarantees between
-  minor versions.
+- pub.dev publish — **on the user's explicit go only** — + example app
+  polished as the reference implementation.
+- ~~Versioning promise documented~~ ✅ see "Versioning & wire
+  compatibility" in README.
 
 ## Explicitly out of scope (and why)
 

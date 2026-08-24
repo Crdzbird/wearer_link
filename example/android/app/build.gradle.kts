@@ -24,7 +24,7 @@ android {
         applicationId = "com.crdzbird.wearer_link_example"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
-        minSdk = flutter.minSdkVersion
+        minSdk = 26 // androidx.wear.tiles requires 26
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
@@ -41,4 +41,11 @@ android {
 
 flutter {
     source = "../.."
+}
+
+dependencies {
+    // Demo tile (DemoTileService): renders synced store state.
+    implementation("androidx.wear.tiles:tiles:1.6.2")
+    implementation("com.google.guava:guava:33.4.0-android")
+    implementation("com.google.android.gms:play-services-wearable:20.0.1")
 }

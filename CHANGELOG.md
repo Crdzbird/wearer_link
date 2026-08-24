@@ -18,6 +18,16 @@ Working prototype.
 * watchOS: `WearerLinkWatch` Swift package for native watch apps
   (activate/send/sync/transfer/wake, startup event buffering).
 
+## 0.8.2
+
+* Wear OS tile surface-update verified on hardware: the example gained
+  `DemoTileService` (renders the synced store's newest record, read
+  natively from the Data Layer item) — a Dart `store.set` +
+  `requestSurfaceUpdate` re-rendered it in ~1s on the Pixel Watch 2.
+  Example minSdk raised to 26 (androidx.wear.tiles requirement).
+* README: tile-fed-by-store recipe + "Versioning & wire compatibility"
+  policy. Roadmap: iOS physical rows formally waived pending hardware.
+
 ## 0.8.1
 
 Hardware verification sweep on the real Pixel 7 Pro + Pixel Watch 2 pair —

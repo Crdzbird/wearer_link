@@ -379,6 +379,36 @@ matrices per simulated platform, and the pending-queue lifecycle. Injected
 events run through the plugin's production dispatch code — the plugin's own
 test suite runs on the same harness.
 
+## Wear OS tile fed by the store (recipe)
+
+`example/android/.../DemoTileService.kt` is a complete reference: a
+`TileService` that reads the synced store's newest record straight from
+the Data Layer item (`/wl/s/__wlstore/<key>`, JSON `{t,n,d,v(base64)}`),
+renders it, and re-renders when the app calls
+
+```dart
+await wearer.store.set('demo', bytes);
+await wearer.requestSurfaceUpdate('com.my.app.DemoTileService');
+```
+
+Ship `androidx.wear.tiles:tiles` in the watch app (the plugin only
+compiles against it) and set `minSdk 26`. Verified on hardware: Dart call
+to re-rendered tile in about a second.
+
+## Versioning & wire compatibility
+
+- **Semver** from 1.0: breaking Dart API changes only in majors.
+- **Wire compatibility is additive**: envelope keys and reserved `/__wl*`
+  paths are never repurposed; new features degrade cleanly against older
+  counterparts (typed error or queued no-op — never a hang, never
+  garbage). Verified degrade paths today: requests -> `noHandler`,
+  encrypted payloads -> dropped-with-diagnostic, tracked transfers ->
+  stream refusal.
+- **Reserved namespace**: application paths must not start with `/__wl`.
+- `WearerStream` is a **byte stream**: bytes arrive complete and in
+  order; write boundaries may merge or split (Android hardware does
+  this). Frame your own messages when you need them.
+
 ## Development
 
 ```sh

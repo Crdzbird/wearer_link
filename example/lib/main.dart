@@ -357,6 +357,21 @@ class _HomePageState extends State<HomePage> {
                   child: const Text('Send file'),
                 ),
                 FilledButton.tonal(
+                  onPressed: () => _run('tile', () async {
+                    // Wear OS only: re-render the demo tile after syncing
+                    // fresh state into the store.
+                    await _link.store.set(
+                      'demo',
+                      Uint8List.fromList(utf8.encode('tile ${DateTime.now()}')),
+                    );
+                    await _link.requestSurfaceUpdate(
+                      'com.crdzbird.wearer_link_example.DemoTileService',
+                    );
+                    _append('tile refresh requested');
+                  }),
+                  child: const Text('Tile refresh'),
+                ),
+                FilledButton.tonal(
                   onPressed: () => _run('storeget', () async {
                     final value = await _link.store.get('demo');
                     _append(

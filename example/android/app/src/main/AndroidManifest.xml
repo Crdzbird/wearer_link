@@ -32,6 +32,19 @@
                 <data android:scheme="wearerlink" android:host="open"/>
             </intent-filter>
         </activity>
+        <!-- Demo Wear OS tile fed by the wearer_link synced store. -->
+        <service
+            android:name=".DemoTileService"
+            android:exported="true"
+            android:label="wearer_link demo"
+            android:permission="com.google.android.wearable.permission.BIND_TILE_PROVIDER">
+            <intent-filter>
+                <action android:name="androidx.wear.tiles.action.BIND_TILE_PROVIDER" />
+            </intent-filter>
+            <meta-data
+                android:name="androidx.wear.tiles.PREVIEW"
+                android:resource="@mipmap/ic_launcher" />
+        </service>
         <!-- URI wearer_link sends to the counterpart in launchCompanion(). -->
         <meta-data
             android:name="com.crdzbird.wearer_link.launchUri"
