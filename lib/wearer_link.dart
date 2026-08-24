@@ -7,11 +7,13 @@ import 'package:meta/meta.dart';
 
 
 import 'src/background.dart';
+import 'src/codecs.dart';
 import 'src/messages.g.dart';
 import 'src/models.dart';
 import 'src/stream.dart';
 
 export 'src/background.dart' show WearerBackgroundHandler;
+export 'src/codecs.dart';
 export 'src/models.dart';
 export 'src/stream.dart' show WearerStream;
 
@@ -58,6 +60,10 @@ class WearerLink {
 
   /// Answers [sendRequest] calls from the counterpart.
   Future<Uint8List> Function(WearerEvent request)? _requestHandler;
+
+  final _routes = <_Route>[];
+  final _requestRoutes = <_Route>[];
+  final _codecs = <Type, WearerCodec<Object?>>{};
 
   // Session-level dedup: delivery is at-least-once, so an event can reach
   // the streams twice (e.g. live dispatch racing the startup replay). Ids
@@ -144,8 +150,26 @@ class WearerLink {
   ///
   /// Android delivers to every reachable capable node unless [nodeId]
   /// narrows it to one; iOS has a single counterpart and ignores [nodeId].
-  Future<void> sendMessage(String path, Uint8List payload, {String? nodeId}) =>
-      _guard(() => _host.sendMessage(path, payload, nodeId));
+  ///
+  /// With [queueIfUnreachable], an unreachable counterpart downgrades the
+  /// call to [transferData] on the same path instead of throwing — it
+  /// arrives later as a **data event** (order relative to live messages is
+  /// not guaranteed).
+  Future<void> sendMessage(
+    String path,
+    Uint8List payload, {
+    String? nodeId,
+    bool queueIfUnreachable = false,
+  }) async {
+    try {
+      await _guard(() => _host.sendMessage(path, payload, nodeId));
+    } on WearerLinkException catch (e) {
+      if (!queueIfUnreachable || e.code != WearerErrorCode.unreachable) {
+        rethrow;
+      }
+      await transferData(path, payload);
+    }
+  }
 
   /// Request/response round trip: resolves with the counterpart's reply.
   ///
@@ -266,6 +290,105 @@ class WearerLink {
   Future<void> clearBackgroundHandler() =>
       _guard(() => _host.clearBackgroundHandler());
 
+  /// Route events whose path matches [pattern] to [handler] — exact
+  /// (`/workout/update`) or trailing-wildcard (`/workout/*`) match. The
+  /// most specific route wins per event: exact beats wildcard, longer
+  /// wildcard prefixes beat shorter ones. Routed events still appear on
+  /// the global [messages]/[dataEvents]/[fileEvents] streams.
+  ///
+  /// Returns a function that removes the route.
+  void Function() on(String pattern, void Function(WearerEvent event) handler) {
+    final route = _Route(pattern, handler);
+    _routes.add(route);
+    _scheduleDrain();
+    return () => _routes.remove(route);
+  }
+
+  /// Answer [sendRequest] calls whose path matches [pattern] (same match
+  /// rules as [on]). Routed handlers win over the global
+  /// [setRequestHandler], which stays as the fallback.
+  ///
+  /// Returns a function that removes the route.
+  void Function() onRequestPath(
+    String pattern,
+    Future<Uint8List> Function(WearerEvent request) handler,
+  ) {
+    final route = _Route.request(pattern, handler);
+    _requestRoutes.add(route);
+    return () => _requestRoutes.remove(route);
+  }
+
+  /// Register how [T] converts to/from payload bytes for the typed helpers
+  /// ([sendTyped], [onTyped], [sendRequestTyped]).
+  void registerCodec<T>(WearerCodec<T> codec) => _codecs[T] = codec;
+
+  WearerCodec<T> _codec<T>() {
+    final codec = _codecs[T];
+    if (codec == null) {
+      throw StateError(
+        'No codec registered for $T — call registerCodec<$T>(...) first.',
+      );
+    }
+    return codec as WearerCodec<T>;
+  }
+
+  /// [sendMessage] with a registered codec doing the encoding.
+  Future<void> sendTyped<T>(String path, T value, {String? nodeId}) =>
+      sendMessage(path, _codec<T>().encode(value), nodeId: nodeId);
+
+  /// [on] with a registered codec doing the decoding.
+  void Function() onTyped<T>(
+    String pattern,
+    void Function(T value, WearerEvent event) handler,
+  ) {
+    final codec = _codec<T>();
+    return on(pattern, (event) => handler(codec.decode(event.payload), event));
+  }
+
+  /// [sendRequest] with registered codecs on both legs.
+  Future<R> sendRequestTyped<T, R>(
+    String path,
+    T value, {
+    String? nodeId,
+    Duration timeout = const Duration(seconds: 10),
+  }) async {
+    final reply = await sendRequest(
+      path,
+      _codec<T>().encode(value),
+      nodeId: nodeId,
+      timeout: timeout,
+    );
+    return _codec<R>().decode(reply);
+  }
+
+  /// Resolves once the counterpart is reachable — immediately when it
+  /// already is. With [timeout], gives up with
+  /// [WearerErrorCode.unreachable].
+  Future<void> whenReachable({Duration? timeout}) async {
+    // Subscribe before the initial check so a reconnect landing between
+    // the two can't be missed.
+    final reachable = Completer<void>();
+    final subscription = connectionState.listen((s) {
+      if (s.isReachable && !reachable.isCompleted) reachable.complete();
+    });
+    try {
+      if ((await getCompanionStatus()).isReachable) return;
+      if (timeout == null) {
+        await reachable.future;
+        return;
+      }
+      await reachable.future.timeout(
+        timeout,
+        onTimeout: () => throw const WearerLinkException(
+          WearerErrorCode.unreachable,
+          'Counterpart did not become reachable in time',
+        ),
+      );
+    } finally {
+      await subscription.cancel();
+    }
+  }
+
   /// Launch the companion app on the counterpart device.
   ///
   /// Android/Wear OS: works both directions and brings the app to the
@@ -302,6 +425,7 @@ class WearerLink {
       _seenIds.remove(_seenIds.first); // Set keeps insertion order: drop oldest
     }
     final event = WearerEvent.fromDto(dto);
+    _Route.bestMatch(_routes, event.path)?.call(event);
     switch (event.kind) {
       case WearerEventKind.message:
         _messages.add(event);
@@ -334,14 +458,18 @@ class _WearerLinkFlutterApiImpl implements WearerLinkFlutterApi {
 
   @override
   Future<Uint8List> onRequest(WearerEventDto event) {
+    final request = WearerEvent.fromDto(event);
+    final route = _Route.bestMatch(_link._requestRoutes, request.path);
+    if (route != null) return route.callRequest(request);
     final handler = _link._requestHandler;
     if (handler == null) {
       throw PlatformException(
         code: 'noHandler',
-        message: 'No request handler registered (setRequestHandler).',
+        message: 'No request handler registered '
+            '(setRequestHandler / onRequestPath).',
       );
     }
-    return handler(WearerEvent.fromDto(event));
+    return handler(request);
   }
 
   @override
@@ -376,4 +504,49 @@ class _WearerLinkFlutterApiImpl implements WearerLinkFlutterApi {
   void onStreamClosed(String streamId, String? error) {
     _link._streams.remove(streamId)?.markClosed(error);
   }
+}
+
+
+/// One registered route: exact path or trailing-`/*` prefix pattern.
+class _Route {
+  _Route(this.pattern, this.handler) : requestHandler = null;
+
+  _Route.request(this.pattern, this.requestHandler) : handler = null;
+
+  final String pattern;
+  final void Function(WearerEvent event)? handler;
+  final Future<Uint8List> Function(WearerEvent request)? requestHandler;
+
+  bool get isWildcard => pattern.endsWith('/*');
+
+  String get prefix => pattern.substring(0, pattern.length - 1); // keeps '/'
+
+  bool matches(String path) =>
+      isWildcard ? path.startsWith(prefix) : path == pattern;
+
+  /// Most specific match: exact beats wildcard; among wildcards the longer
+  /// prefix wins; ties resolve to the earliest registration.
+  static _Route? bestMatch(List<_Route> routes, String path) {
+    _Route? best;
+    for (final route in routes) {
+      if (!route.matches(path)) continue;
+      if (!route.isWildcard) return route;
+      if (best == null || route.prefix.length > best.prefix.length) {
+        best = route;
+      }
+    }
+    return best;
+  }
+
+  void call(WearerEvent event) {
+    try {
+      handler?.call(event);
+    } catch (error, stack) {
+      // A route handler error must not break dispatch to other listeners;
+      // surface it as an unhandled async error instead of swallowing it.
+      Zone.current.handleUncaughtError(error, stack);
+    }
+  }
+
+  Future<Uint8List> callRequest(WearerEvent request) => requestHandler!(request);
 }

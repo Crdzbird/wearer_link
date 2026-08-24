@@ -16,6 +16,8 @@ final backgroundHandled = <WearerEvent>[];
 Uint8List _bytes(String text) => Uint8List.fromList(utf8.encode(text));
 
 void main() {
+  routerAndTypedTests();
+
   test('pair delivers messages both ways', () async {
     final (phone, watch) = WearerLinkFake.pair();
     final atWatch = <WearerEvent>[];
@@ -225,5 +227,143 @@ void main() {
             .having((e) => e.code, 'code', WearerErrorCode.unsupported),
       ),
     );
+  });
+}
+
+// ---- M6.2–6.4: router, typed codecs, reachability helpers -----------------
+
+class _Counter {
+  const _Counter(this.value);
+  final int value;
+  Map<String, Object?> toJson() => {'value': value};
+  static _Counter fromJson(Map<String, Object?> json) =>
+      _Counter(json['value'] as int);
+}
+
+void routerAndTypedTests() {
+  test('router: exact beats wildcard, longest wildcard wins', () async {
+    final (phone, watch) = WearerLinkFake.pair();
+    final hits = <String>[];
+    watch.on('/a/b', (e) => hits.add('exact'));
+    watch.on('/a/*', (e) => hits.add('short'));
+    watch.on('/a/b/*', (e) => hits.add('long'));
+    await pumpEventQueue();
+
+    await phone.sendMessage('/a/b', Uint8List(0));
+    await phone.sendMessage('/a/b/c', Uint8List(0));
+    await phone.sendMessage('/a/x', Uint8List(0));
+    await phone.sendMessage('/elsewhere', Uint8List(0));
+    await pumpEventQueue();
+
+    expect(hits, ['exact', 'long', 'short']);
+  });
+
+  test('router: routed events still reach global streams; cancel works',
+      () async {
+    final (phone, watch) = WearerLinkFake.pair();
+    final routed = <WearerEvent>[];
+    final global = <WearerEvent>[];
+    final cancel = watch.on('/x', routed.add);
+    watch.messages.listen(global.add);
+    await pumpEventQueue();
+
+    await phone.sendMessage('/x', Uint8List(0));
+    await pumpEventQueue();
+    expect(routed, hasLength(1));
+    expect(global, hasLength(1));
+
+    cancel();
+    await phone.sendMessage('/x', Uint8List(0));
+    await pumpEventQueue();
+    expect(routed, hasLength(1));
+    expect(global, hasLength(2));
+  });
+
+  test('request routes win over the global handler', () async {
+    final (phone, watch) = WearerLinkFake.pair();
+    watch.setRequestHandler((req) async => _bytes('global'));
+    watch.onRequestPath('/special', (req) async => _bytes('routed'));
+
+    expect(utf8.decode(await phone.sendRequest('/special', Uint8List(0))),
+        'routed');
+    expect(utf8.decode(await phone.sendRequest('/other', Uint8List(0))),
+        'global');
+  });
+
+  test('typed send/receive/request round-trips through codecs', () async {
+    final (phone, watch) = WearerLinkFake.pair();
+    for (final link in [phone, watch]) {
+      link.registerCodec<_Counter>(
+        WearerJsonCodec(_Counter.fromJson),
+      );
+    }
+
+    final received = <int>[];
+    watch.onTyped<_Counter>('/count', (value, _) => received.add(value.value));
+    watch.onRequestPath('/double', (req) async {
+      final value = _Counter.fromJson(
+        jsonDecode(utf8.decode(req.payload)) as Map<String, Object?>,
+      );
+      return _bytes(jsonEncode(_Counter(value.value * 2).toJson()));
+    });
+    await pumpEventQueue();
+
+    await phone.sendTyped('/count', const _Counter(7));
+    await pumpEventQueue();
+    expect(received, [7]);
+
+    final doubled = await phone.sendRequestTyped<_Counter, _Counter>(
+      '/double',
+      const _Counter(21),
+    );
+    expect(doubled.value, 42);
+  });
+
+  test('missing codec throws a clear StateError', () async {
+    final (phone, _) = WearerLinkFake.pair();
+    expect(
+      () => phone.sendTyped('/x', const _Counter(1)),
+      throwsA(isA<StateError>().having(
+          (e) => e.message, 'message', contains('registerCodec<_Counter>'))),
+    );
+  });
+
+  test('whenReachable resolves on reconnect and times out honestly',
+      () async {
+    final (phone, _) = WearerLinkFake.pair();
+    await phone.whenReachable(); // already reachable: immediate
+
+    phone.setReachable(false);
+    await expectLater(
+      phone.whenReachable(timeout: const Duration(milliseconds: 50)),
+      throwsA(
+        isA<WearerLinkException>()
+            .having((e) => e.code, 'code', WearerErrorCode.unreachable),
+      ),
+    );
+
+    final waiting = phone.whenReachable(timeout: const Duration(seconds: 5));
+    phone.setReachable(true);
+    await waiting; // resolves via the connectionState event
+  });
+
+  test('queueIfUnreachable downgrades to a queued transfer', () async {
+    final (phone, watch) = WearerLinkFake.pair();
+    final data = <WearerEvent>[];
+    watch.dataEvents.listen(data.add);
+    await pumpEventQueue();
+
+    phone.setReachable(false);
+    await phone.sendMessage(
+      '/cmd',
+      _bytes('later'),
+      queueIfUnreachable: true,
+    ); // no throw
+    expect(data, isEmpty);
+
+    phone.setReachable(true);
+    await pumpEventQueue();
+    expect(data.single.path, '/cmd');
+    expect(utf8.decode(data.single.payload), 'later');
   });
 }

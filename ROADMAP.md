@@ -53,7 +53,7 @@ fakeLink.simulateColdStart();                      // queue -> replay path
   the harness is trustworthy because we use it ourselves.
 - Effort: M.
 
-### 6.2 Path router
+### 6.2 Path router ✅ shipped
 
 ```dart
 wearer.on('/workout/update', (event) { ... });     // exact
@@ -68,7 +68,7 @@ wearer.onRequestPath('/echo', (req) async => ...); // per-path request handler
   handlers take precedence; global handler is the fallback).
 - Effort: S. Pure Dart.
 
-### 6.3 Typed codecs
+### 6.3 Typed codecs ✅ shipped
 
 ```dart
 wearer.registerCodec<WorkoutState>(JsonCodec(WorkoutState.fromJson));
@@ -81,7 +81,7 @@ final reply = await wearer.sendRequestTyped<Query, Answer>('/q', query);
   open for proto/msgpack.
 - Effort: S.
 
-### 6.4 Reachability helpers
+### 6.4 Reachability helpers ✅ shipped
 
 ```dart
 await wearer.whenReachable(timeout: Duration(seconds: 30));

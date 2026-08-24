@@ -20,6 +20,14 @@ Working prototype.
 
 ## 0.5.0 (in progress)
 
+* Path router: `on('/workout/*', handler)` / `onRequestPath` — exact and
+  trailing-wildcard routes, most-specific match wins, request routes take
+  precedence over the global handler.
+* Typed codecs: `registerCodec` + `sendTyped` / `onTyped` /
+  `sendRequestTyped`, with `WearerJsonCodec` built in.
+* Reachability helpers: `whenReachable({timeout})` and
+  `sendMessage(..., queueIfUnreachable: true)` (downgrades to a queued
+  transfer instead of throwing).
 * `package:wearer_link/testing.dart`: `WearerLinkFake.pair()` — in-memory
   two-endpoint harness reproducing the full delivery contract
   (reachability, kill/relaunch replay, background handler + ack, streams,
