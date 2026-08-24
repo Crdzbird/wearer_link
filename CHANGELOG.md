@@ -18,6 +18,14 @@ Working prototype.
 * watchOS: `WearerLinkWatch` Swift package for native watch apps
   (activate/send/sync/transfer/wake, startup event buffering).
 
+## 1.2.1
+
+* Example: watch-adaptive layout for round Wear OS screens (screens with
+  shortestSide < 300): compact buttons and density, single-line status,
+  one-row audio card, cover-fitted video card, smaller chips/log text,
+  bezel-safe padding. Verified on the Pixel Watch 2 (audio + video cards
+  re-rendered cleanly). Phone layout unchanged.
+
 ## 1.2.0
 
 Example app: real media, rendered.

@@ -302,21 +302,73 @@ class _HomePageState extends State<HomePage> {
   @override
   Widget build(BuildContext context) {
     final status = _status;
-    return Scaffold(
-      appBar: AppBar(title: const Text('wearer_link demo')),
-      // One scrollable list so the demo also fits small/round Wear OS screens.
-      body: SafeArea(
+    // Watch mode: round Wear OS screens get compact controls, fitted media
+    // and bezel-safe padding instead of the phone layout squeezed down.
+    final isWatch = MediaQuery.sizeOf(context).shortestSide < 300;
+    final theme = Theme.of(context);
+    final body = Theme(
+      data: isWatch
+          ? theme.copyWith(
+              visualDensity: VisualDensity.compact,
+              filledButtonTheme: FilledButtonThemeData(
+                style: FilledButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 4,
+                  ),
+                  minimumSize: const Size(0, 32),
+                  textStyle: const TextStyle(fontSize: 12),
+                ),
+              ),
+              outlinedButtonTheme: OutlinedButtonThemeData(
+                style: OutlinedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 4,
+                  ),
+                  minimumSize: const Size(0, 32),
+                  textStyle: const TextStyle(fontSize: 12),
+                ),
+              ),
+            )
+          : theme,
+      child: SafeArea(
         child: ListView(
+          padding: isWatch
+              ? const EdgeInsets.fromLTRB(20, 28, 20, 40)
+              : EdgeInsets.zero,
           children: [
             ListTile(
-              leading: Icon(
-                status?.isReachable ?? false ? Icons.watch : Icons.watch_off,
-                color: status?.isReachable ?? false
-                    ? Colors.green
-                    : Colors.grey,
+              dense: isWatch,
+              contentPadding: isWatch ? EdgeInsets.zero : null,
+              leading: isWatch
+                  ? null
+                  : Icon(
+                      status?.isReachable ?? false
+                          ? Icons.watch
+                          : Icons.watch_off,
+                      color: status?.isReachable ?? false
+                          ? Colors.green
+                          : Colors.grey,
+                    ),
+              title: Text(
+                isWatch
+                    ? (status?.state.name ?? '…')
+                    : 'Companion: ${status?.state.name ?? '…'}',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: isWatch
+                    ? TextStyle(
+                        fontSize: 13,
+                        color: status?.isReachable ?? false
+                            ? Colors.green
+                            : Colors.grey,
+                      )
+                    : null,
               ),
-              title: Text('Companion: ${status?.state.name ?? '…'}'),
-              subtitle: Text('nodes: ${status?.nodes.join(', ') ?? '-'}'),
+              subtitle: isWatch
+                  ? null
+                  : Text('nodes: ${status?.nodes.join(', ') ?? '-'}'),
               trailing: IconButton(
                 icon: const Icon(Icons.refresh),
                 onPressed: _refreshStatus,
@@ -326,30 +378,22 @@ class _HomePageState extends State<HomePage> {
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 12),
               child: Wrap(
-                spacing: 8,
-                runSpacing: 4,
+                spacing: 6,
+                runSpacing: 2,
                 children: [
                   if (_syncedCounter != null)
-                    Chip(
-                      avatar: const Icon(Icons.sync, size: 16),
-                      label: Text('counter $_syncedCounter'),
-                    ),
+                    _chip(isWatch, Icons.sync, 'counter $_syncedCounter'),
                   if (_rtt != null)
-                    Chip(
-                      avatar: const Icon(Icons.speed, size: 16),
-                      label: Text('rtt ${_rtt!.inMilliseconds}ms'),
-                    ),
+                    _chip(isWatch, Icons.speed, '${_rtt!.inMilliseconds}ms'),
                   if (_vitals != null)
-                    Chip(
-                      avatar: Icon(
-                        _vitals!.isCharging
-                            ? Icons.battery_charging_full
-                            : Icons.battery_std,
-                        size: 16,
-                      ),
-                      label: Text(
-                        '${_vitals!.model} ${_vitals!.batteryPercent}%',
-                      ),
+                    _chip(
+                      isWatch,
+                      _vitals!.isCharging
+                          ? Icons.battery_charging_full
+                          : Icons.battery_std,
+                      isWatch
+                          ? '${_vitals!.batteryPercent}%'
+                          : '${_vitals!.model} ${_vitals!.batteryPercent}%',
                     ),
                 ],
               ),
@@ -549,41 +593,51 @@ class _HomePageState extends State<HomePage> {
                   children: [
                     Image.file(
                       File(_receivedImagePath!),
-                      height: 180,
+                      height: isWatch ? 90 : 180,
                       width: double.infinity,
                       fit: BoxFit.cover,
                     ),
-                    const ListTile(
-                      dense: true,
-                      leading: Icon(Icons.image),
-                      title: Text('received photo'),
-                    ),
+                    _mediaCaption(isWatch, Icons.image, 'received photo'),
                   ],
                 ),
               ),
             if (_receivedAudioPath != null)
               Card(
                 margin: const EdgeInsets.all(8),
-                child: ListTile(
-                  leading: IconButton(
-                    icon: Icon(
-                      _audioPlaying
-                          ? Icons.stop_circle
-                          : Icons.play_circle_fill,
-                      size: 36,
-                    ),
-                    onPressed: () async {
-                      if (_audioPlaying) {
-                        await _audioPlayer.stop();
-                        setState(() => _audioPlaying = false);
-                      } else {
-                        await _playAudio(_receivedAudioPath!);
-                      }
-                    },
+                child: Padding(
+                  padding: EdgeInsets.symmetric(
+                    horizontal: isWatch ? 8 : 16,
+                    vertical: isWatch ? 2 : 8,
                   ),
-                  title: const Text('received audio clip'),
-                  subtitle: Text(
-                    _audioPlaying ? 'playing…' : 'tap to play again',
+                  child: Row(
+                    children: [
+                      IconButton(
+                        padding: EdgeInsets.zero,
+                        icon: Icon(
+                          _audioPlaying
+                              ? Icons.stop_circle
+                              : Icons.play_circle_fill,
+                          size: isWatch ? 28 : 36,
+                        ),
+                        onPressed: () async {
+                          if (_audioPlaying) {
+                            await _audioPlayer.stop();
+                            setState(() => _audioPlaying = false);
+                          } else {
+                            await _playAudio(_receivedAudioPath!);
+                          }
+                        },
+                      ),
+                      const SizedBox(width: 4),
+                      Expanded(
+                        child: Text(
+                          _audioPlaying ? 'audio: playing…' : 'audio clip',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(fontSize: isWatch ? 12 : 15),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ),
@@ -593,15 +647,31 @@ class _HomePageState extends State<HomePage> {
                 clipBehavior: Clip.antiAlias,
                 child: Column(
                   children: [
-                    AspectRatio(
-                      aspectRatio: _video!.value.aspectRatio,
-                      child: VideoPlayer(_video!),
+                    SizedBox(
+                      height: isWatch ? 100 : null,
+                      width: double.infinity,
+                      child: isWatch
+                          ? FittedBox(
+                              fit: BoxFit.cover,
+                              clipBehavior: Clip.hardEdge,
+                              child: SizedBox(
+                                width: _video!.value.size.width,
+                                height: _video!.value.size.height,
+                                child: VideoPlayer(_video!),
+                              ),
+                            )
+                          : AspectRatio(
+                              aspectRatio: _video!.value.aspectRatio,
+                              child: VideoPlayer(_video!),
+                            ),
                     ),
-                    ListTile(
-                      dense: true,
-                      leading: const Icon(Icons.videocam),
-                      title: const Text('received video (looping)'),
+                    _mediaCaption(
+                      isWatch,
+                      Icons.videocam,
+                      isWatch ? 'video' : 'received video (looping)',
                       trailing: IconButton(
+                        padding: EdgeInsets.zero,
+                        iconSize: isWatch ? 20 : 24,
                         icon: Icon(
                           _video!.value.isPlaying
                               ? Icons.pause
@@ -620,15 +690,56 @@ class _HomePageState extends State<HomePage> {
             const Divider(),
             for (final line in _log)
               Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 16,
+                padding: EdgeInsets.symmetric(
+                  horizontal: isWatch ? 4 : 16,
                   vertical: 2,
                 ),
-                child: Text(line, style: const TextStyle(fontSize: 13)),
+                child: Text(
+                  line,
+                  style: TextStyle(fontSize: isWatch ? 10 : 13),
+                ),
               ),
           ],
         ),
       ),
     );
+    return Scaffold(
+      appBar: isWatch ? null : AppBar(title: const Text('wearer_link demo')),
+      body: body,
+    );
   }
+
+  Widget _chip(bool isWatch, IconData icon, String label) => Chip(
+    visualDensity: VisualDensity.compact,
+    avatar: Icon(icon, size: isWatch ? 12 : 16),
+    labelPadding: isWatch ? const EdgeInsets.symmetric(horizontal: 2) : null,
+    label: Text(label, style: TextStyle(fontSize: isWatch ? 10 : 13)),
+  );
+
+  Widget _mediaCaption(
+    bool isWatch,
+    IconData icon,
+    String label, {
+    Widget? trailing,
+  }) => Padding(
+    padding: EdgeInsets.symmetric(
+      horizontal: isWatch ? 8 : 16,
+      vertical: isWatch ? 2 : 6,
+    ),
+    child: Row(
+      children: [
+        Icon(icon, size: isWatch ? 14 : 20),
+        const SizedBox(width: 6),
+        Expanded(
+          child: Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: isWatch ? 11 : 14),
+          ),
+        ),
+        if (trailing != null) trailing,
+      ],
+    ),
+  );
 }
