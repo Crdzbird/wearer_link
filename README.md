@@ -10,7 +10,11 @@ compiled on all three toolchains. Android verified end-to-end on real
 hardware (Pixel 7 Pro + Pixel Watch 2): bidirectional messaging, sync,
 transfer, and the killed-app path (events sent while the phone app was
 force-stopped are replayed with `deliveredWhileDead: true`). iOS/watchOS
-device-pair testing pending.
+iOS/watchOS verified on a paired
+simulator set (iPhone 17 Pro Max + Watch Series 11): reachability, messaging
+and request/response RPC in both directions, applicationContext sync and
+readSyncData. Simulators cannot faithfully test transferUserInfo/transferFile
+delivery or the killed-app background wake — those still need a real pair.
 
 ## Quick start
 
@@ -113,6 +117,8 @@ Flutter does not run on watchOS: the watch app is a native SwiftUI target
 that uses the bundled `WearerLinkWatch` Swift package.
 
 1. In Xcode: **File → New → Target → Watch App** for your iOS app.
+   (`example/ios` contains a complete reference target, `RunnerWatch`,
+   wired to the local package and embedded into the Runner app.)
 2. **File → Add Package Dependencies → Add Local…** and select
    `<pub-cache-or-repo>/wearer_link/watchos/WearerLinkWatch`; add the library
    to the watch target.

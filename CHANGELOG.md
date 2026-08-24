@@ -20,6 +20,10 @@ Working prototype.
 
 ## 0.3.0
 
+* Example gained a `RunnerWatch` watchOS target (SwiftUI + WearerLinkWatch).
+  iOS/watchOS verified on paired simulators: messaging + RPC both
+  directions, applicationContext sync, readSyncData.
+
 * `sendRequest` / `setRequestHandler`: request-response RPC with reply
   payloads (Android `MessageClient.sendRequest`; iOS `sendMessage` reply
   dictionaries; watchOS `sendRequest`/`onRequest`). Dart-side timeout
