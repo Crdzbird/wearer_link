@@ -259,7 +259,7 @@ iPhone + Apple Watch hardware. The iOS implementations are sim-verified
 where the simulator permits; rows marked ⬜ in the iOS column are release
 waivers, not unknown-unknowns.
 
-## 1.0 criteria
+## 1.0 criteria — ✅ met; 1.0.0 cut 2026-08-24 (unpublished, git-only)
 
 - M6–M8 shipped; hardware matrix has no ⬜ in at least one full platform
   column per row (or a documented waiver).

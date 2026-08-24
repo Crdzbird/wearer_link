@@ -18,6 +18,36 @@ Working prototype.
 * watchOS: `WearerLinkWatch` Swift package for native watch apps
   (activate/send/sync/transfer/wake, startup event buffering).
 
+## 1.0.0
+
+First stable release. The API is now under semver: breaking Dart API
+changes only in majors, wire compatibility additive across minors (see
+"Versioning & wire compatibility" in the README).
+
+Everything below is cumulative through the 0.x line — highlights:
+
+* **Core link**: messaging, latest-state sync, queued transfers, file
+  transfers, mutual app launch — phone ⇄ Wear OS (symmetric Flutter) and
+  iPhone ⇄ watchOS (native `WearerLinkWatch` Swift package).
+* **Delivery contract**: at-least-once with session dedup; events that
+  arrive while the app is killed are received natively, queued, and
+  replayed flagged `deliveredWhileDead` — or handled immediately in a
+  headless background isolate.
+* **RPC** with reply payloads, **bidirectional byte streams**,
+  size-unlimited transfers, tracked transfers with progress, a **synced
+  KV store** (LWW + tombstones, persisted by the OS sync layer), launch
+  intents, counterpart vitals, capabilities introspection, lossless
+  delivery toggle, app-supplied **payload encryption**, diagnostics.
+* **Tooling**: `WearerLinkFake` in-memory pair harness, path router,
+  typed codecs, reachability helpers.
+* **Verification**: Android matrix fully green on real hardware
+  (Pixel 7 Pro + Pixel Watch 2), incl. a store-fed Wear OS tile
+  re-rendering on request; iOS verified on paired simulators, physical
+  Apple hardware rows formally waived. 52 Dart + 4 Kotlin tests; CI
+  compiles all three native stacks.
+
+Not published to pub.dev; distribution is via git until further notice.
+
 ## 0.8.2
 
 * Wear OS tile surface-update verified on hardware: the example gained
