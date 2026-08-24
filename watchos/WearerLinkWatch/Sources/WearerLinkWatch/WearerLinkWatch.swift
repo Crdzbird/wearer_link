@@ -1,3 +1,8 @@
+// The library is watchOS-only; toolchains that also compile the package for
+// the iOS side of a paired build get an empty module instead of a class that
+// cannot satisfy iOS's stricter WCSessionDelegate requirements.
+#if os(watchOS)
+
 import Foundation
 import WatchConnectivity
 
@@ -348,3 +353,5 @@ extension WearerLinkWatch: WCSessionDelegate {
     handleInbound(metadata, fileURL: dest)
   }
 }
+
+#endif  // os(watchOS)
