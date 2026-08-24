@@ -242,14 +242,15 @@ The simulator-untestable behaviors, tracked as a table in this file:
 | Killed-app background wake + replay | ✅ verified 0.1 | ⬜ |
 | Background isolate handling | ✅ verified 0.2 | ⬜ |
 | transferFile delivery | ✅ verified 0.2 | ⬜ |
-| Blob (oversized transferData) delivery | ⬜ | ⬜ |
-| Streams on hardware | ⬜ | ⬜ |
-| RPC happy path on hardware | ⬜ (sim-verified iOS) | ⬜ |
-| Launch-with-intent foreground open | ⬜ | n/a (workout-only) |
+| Blob (oversized transferData) delivery | ✅ 0.8.1 (153KB intact) | ⬜ |
+| Streams on hardware | ✅ 0.8.1 (ordered; write boundaries may merge — documented) | ⬜ |
+| RPC happy path on hardware | ✅ 0.8.1 (after REQUEST_RECEIVED fix) | ⬜ (sim-verified) |
+| Launch-with-intent foreground open | ✅ 0.8.1 (foreground + route/args) | n/a (workout-only) |
 | Complication push budget behavior | n/a | ⬜ |
+| Counterpart vitals on hardware | ✅ 0.8.1 (real battery/charging) | ⬜ (sim-verified) |
 | Tile/complication surface update | ⬜ needs app with tile | n/a |
-| Store conflict under real latency | ⬜ | ⬜ |
-| Tracked transfer progress on hardware | ⬜ (needs Dart both ends) | n/a (native watch) |
+| Store conflict under real latency | ✅ 0.8.1 (LWW converged to later writer) | ⬜ |
+| Tracked transfer progress on hardware | ✅ 0.8.1 (2MB md5-identical, framed header) | n/a (native watch) |
 
 ---
 

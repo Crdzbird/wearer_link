@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data' show BytesBuilder, ByteData;
 import 'dart:ui';
 
 import 'package:flutter/foundation.dart' show debugPrint, visibleForTesting;
@@ -229,9 +230,15 @@ class WearerLink {
     _sentEvents++;
     unawaited(() async {
       try {
-        await stream.send(
-          Uint8List.fromList(utf8.encode(jsonEncode({'p': path, 's': size}))),
-        );
+        // Header rides the same byte stream as the file: length-prefix it,
+        // because Android's native channel streams do not preserve message
+        // boundaries (a read may merge the header with file bytes).
+        final header =
+            Uint8List.fromList(utf8.encode(jsonEncode({'p': path, 's': size})));
+        final framed = Uint8List(4 + header.length)
+          ..buffer.asByteData().setUint32(0, header.length)
+          ..setRange(4, 4 + header.length, header);
+        await stream.send(framed);
         await for (final chunk in file.openRead()) {
           await stream.send(
             chunk is Uint8List ? chunk : Uint8List.fromList(chunk),
@@ -736,12 +743,25 @@ class WearerLink {
     IOSink? sink;
     File? target;
     var received = 0;
+    // The header is length-prefixed because the byte stream may split or
+    // merge writes (Android channel streams preserve order, not
+    // boundaries) — buffer until it is complete.
+    final pendingHeader = BytesBuilder(copy: false);
     stream.data.listen(
       (chunk) {
         if (userPath == null) {
+          pendingHeader.add(chunk);
+          final buffered = pendingHeader.toBytes();
+          if (buffered.length < 4) return;
+          final headerLength =
+              ByteData.sublistView(buffered, 0, 4).getUint32(0);
+          if (buffered.length < 4 + headerLength) return;
           try {
-            final header =
-                jsonDecode(utf8.decode(chunk)) as Map<String, Object?>;
+            final header = jsonDecode(
+              utf8.decode(
+                Uint8List.sublistView(buffered, 4, 4 + headerLength),
+              ),
+            ) as Map<String, Object?>;
             userPath = header['p'] as String? ?? '/';
             target = File(
               '${Directory.systemTemp.path}/wearer_link_rx_'
@@ -755,7 +775,15 @@ class WearerLink {
               'malformed tracked-transfer header: $e',
             );
             unawaited(stream.close().catchError((_) {}));
+            return;
           }
+          // Bytes that arrived merged with the header are file data.
+          final rest = buffered.length - 4 - headerLength;
+          if (rest > 0) {
+            sink!.add(Uint8List.sublistView(buffered, 4 + headerLength));
+            received += rest;
+          }
+          pendingHeader.clear();
           return;
         }
         sink?.add(chunk);

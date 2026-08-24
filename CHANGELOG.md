@@ -18,6 +18,27 @@ Working prototype.
 * watchOS: `WearerLinkWatch` Swift package for native watch apps
   (activate/send/sync/transfer/wake, startup event buffering).
 
+## 0.8.1
+
+Hardware verification sweep on the real Pixel 7 Pro + Pixel Watch 2 pair —
+two hardware-only bugs found and fixed:
+
+* **Fix**: the manifest listener was missing the
+  `com.google.android.gms.wearable.REQUEST_RECEIVED` action, so
+  `sendRequest` (and the built-in vitals responder) never received RPCs on
+  real Android hardware — every request timed out. Simulators masked this
+  (iOS RPC rides the plugin's own envelope).
+* **Fix**: tracked file transfers now length-prefix their header frame.
+  Android's native channel streams do not preserve write boundaries
+  (observed merged chunks on hardware), so the "first chunk = header"
+  assumption was unsafe. `WearerStream` docs now state the byte-stream
+  contract explicitly.
+* Vitals model string no longer duplicates the manufacturer.
+* Matrix results: RPC + vitals (real battery/charging), 153KB blob intact,
+  streams ordered, 2MB tracked transfer md5-identical, store LWW converged
+  under real latency, launch-with-intent foregrounded the watch app with
+  route/args.
+
 ## 0.8.0
 
 * Example app: "Share photo" (image_picker -> tracked transfer -> progress

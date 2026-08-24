@@ -83,7 +83,12 @@ class _HomePageState extends State<HomePage> {
           }
         }),
       )
-      ..add(_link.connectionState.listen((s) => setState(() => _status = s)));
+      ..add(_link.connectionState.listen((s) => setState(() => _status = s)))
+      ..add(
+        _link.launchIntents.listen(
+          (intent) => _append('launch intent: ${intent.route} ${intent.args}'),
+        ),
+      );
     _refreshStatus();
     _link
         .registerBackgroundHandler(demoBackgroundHandler)
@@ -351,8 +356,24 @@ class _HomePageState extends State<HomePage> {
                   }),
                   child: const Text('Send file'),
                 ),
+                FilledButton.tonal(
+                  onPressed: () => _run('storeget', () async {
+                    final value = await _link.store.get('demo');
+                    _append(
+                      'store demo = '
+                      '${value == null ? 'null' : _decode(value)}',
+                    );
+                  }),
+                  child: const Text('Store get'),
+                ),
                 OutlinedButton(
-                  onPressed: () => _run('launch', _link.launchCompanion),
+                  onPressed: () => _run(
+                    'launch',
+                    () => _link.launchCompanion(
+                      route: '/workout',
+                      args: {'id': 42},
+                    ),
+                  ),
                   child: const Text('Launch companion'),
                 ),
               ],

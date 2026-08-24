@@ -9,6 +9,13 @@ import 'package:meta/meta.dart';
 /// iOS/watchOS frame it over interactive messages. Either way it needs a
 /// reachable counterpart for its whole lifetime — when the link drops the
 /// stream closes with an error.
+///
+/// **Byte stream, not datagrams**: bytes arrive complete and in order, but
+/// [send] boundaries are not guaranteed to survive — Android's native
+/// channels may merge or split writes (verified on hardware), while iOS
+/// happens to preserve them. If your protocol needs messages, add your own
+/// framing (e.g. length prefixes), exactly as the plugin's tracked file
+/// transfers do.
 class WearerStream {
   /// Internal: streams come from `openStream` / `incomingStreams`.
   @internal

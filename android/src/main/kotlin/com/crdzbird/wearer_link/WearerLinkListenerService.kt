@@ -198,7 +198,13 @@ class WearerLinkListenerService : WearableListenerService() {
     return org.json.JSONObject()
       .put("battery", if (percent in 0..100) percent else -1)
       .put("charging", battery.isCharging)
-      .put("model", "${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}")
+      .put(
+        "model",
+        android.os.Build.MODEL.let { model ->
+          val make = android.os.Build.MANUFACTURER
+          if (model.startsWith(make, ignoreCase = true)) model else "$make $model"
+        },
+      )
       .put("os", "Android ${android.os.Build.VERSION.RELEASE}")
       .toString()
       .toByteArray(Charsets.UTF_8)
