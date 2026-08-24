@@ -1,5 +1,8 @@
 # wearer_link — Working Prototype Plan
 
+> M0–M5 below have shipped. The post-0.4.0 feature roadmap (M6–M8, road
+> to 1.0) lives in [ROADMAP.md](ROADMAP.md).
+
 A Flutter plugin that connects a phone app (Android / iOS) with its wearable
 companion (Wear OS / watchOS): bidirectional messaging, shared/synced data,
 delivery while the phone app is **not running**, and mutual app launch where

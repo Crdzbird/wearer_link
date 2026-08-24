@@ -4,8 +4,8 @@ Connect a Flutter phone app with its wearable companion (**Wear OS** /
 **watchOS**): bidirectional messaging, synced data, **delivery while the app
 is not running**, and mutual app launch where the platform allows it.
 
-See [PLAN.md](PLAN.md) for the architecture, platform constraints, and
-roadmap. Prototype status: Dart API + Android + iOS/watchOS implemented and
+See [PLAN.md](PLAN.md) for the architecture and platform constraints, and
+[ROADMAP.md](ROADMAP.md) for the feature roadmap to 1.0. Prototype status: Dart API + Android + iOS/watchOS implemented and
 compiled on all three toolchains. Android verified end-to-end on real
 hardware (Pixel 7 Pro + Pixel Watch 2): bidirectional messaging, sync,
 transfer, and the killed-app path (events sent while the phone app was
