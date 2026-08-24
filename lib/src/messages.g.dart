@@ -370,6 +370,118 @@ class WearerCapabilitiesDto {
   int get hashCode => _deepHash(<Object?>[runtimeType, ..._toList()]);
 }
 
+/// A connected counterpart node.
+class WearerNodeDto {
+  WearerNodeDto({
+    required this.id,
+    required this.displayName,
+    required this.isNearby,
+  });
+
+  String id;
+
+  /// Human-readable device name where the platform provides one.
+  String displayName;
+
+  /// Android: Node.isNearby (direct Bluetooth/Wi-Fi link, not cloud).
+  /// iOS: mirrors reachability (the API has no separate notion).
+  bool isNearby;
+
+  List<Object?> _toList() {
+    return <Object?>[
+      id,
+      displayName,
+      isNearby,
+    ];
+  }
+
+  Object encode() {
+    return _toList();  }
+
+  static WearerNodeDto decode(Object result) {
+    result as List<Object?>;
+    return WearerNodeDto(
+      id: result[0]! as String,
+      displayName: result[1]! as String,
+      isNearby: result[2]! as bool,
+    );
+  }
+
+  @override
+  // ignore: avoid_equals_and_hash_code_on_mutable_classes
+  bool operator ==(Object other) {
+    if (other is! WearerNodeDto || other.runtimeType != runtimeType) {
+      return false;
+    }
+    if (identical(this, other)) {
+      return true;
+    }
+    return _deepEquals(id, other.id) && _deepEquals(displayName, other.displayName) && _deepEquals(isNearby, other.isNearby);
+  }
+
+  @override
+  // ignore: avoid_equals_and_hash_code_on_mutable_classes
+  int get hashCode => _deepHash(<Object?>[runtimeType, ..._toList()]);
+}
+
+/// The counterpart device's vitals, served by a built-in handler on the
+/// other side — works even before the counterpart app registers anything.
+class CounterpartStatusDto {
+  CounterpartStatusDto({
+    required this.batteryPercent,
+    required this.isCharging,
+    required this.model,
+    required this.osVersion,
+  });
+
+  /// 0–100, or -1 when the counterpart could not read it.
+  int batteryPercent;
+
+  bool isCharging;
+
+  String model;
+
+  String osVersion;
+
+  List<Object?> _toList() {
+    return <Object?>[
+      batteryPercent,
+      isCharging,
+      model,
+      osVersion,
+    ];
+  }
+
+  Object encode() {
+    return _toList();  }
+
+  static CounterpartStatusDto decode(Object result) {
+    result as List<Object?>;
+    return CounterpartStatusDto(
+      batteryPercent: result[0]! as int,
+      isCharging: result[1]! as bool,
+      model: result[2]! as String,
+      osVersion: result[3]! as String,
+    );
+  }
+
+  @override
+  // ignore: avoid_equals_and_hash_code_on_mutable_classes
+  bool operator ==(Object other) {
+    if (other is! CounterpartStatusDto || other.runtimeType != runtimeType) {
+      return false;
+    }
+    if (identical(this, other)) {
+      return true;
+    }
+    return _deepEquals(batteryPercent, other.batteryPercent) && _deepEquals(isCharging, other.isCharging) && _deepEquals(model, other.model) && _deepEquals(osVersion, other.osVersion);
+  }
+
+  @override
+  // ignore: avoid_equals_and_hash_code_on_mutable_classes
+  int get hashCode => _deepHash(<Object?>[runtimeType, ..._toList()]);
+}
+
 
 class _PigeonCodec extends StandardMessageCodec {
   const _PigeonCodec();
@@ -396,6 +508,12 @@ class _PigeonCodec extends StandardMessageCodec {
     }    else if (value is WearerCapabilitiesDto) {
       buffer.putUint8(134);
       writeValue(buffer, value.encode());
+    }    else if (value is WearerNodeDto) {
+      buffer.putUint8(135);
+      writeValue(buffer, value.encode());
+    }    else if (value is CounterpartStatusDto) {
+      buffer.putUint8(136);
+      writeValue(buffer, value.encode());
     } else {
       super.writeValue(buffer, value);
     }
@@ -419,6 +537,10 @@ class _PigeonCodec extends StandardMessageCodec {
         return WearerEventDto.decode(readValue(buffer)!);
       case 134:
         return WearerCapabilitiesDto.decode(readValue(buffer)!);
+      case 135:
+        return WearerNodeDto.decode(readValue(buffer)!);
+      case 136:
+        return CounterpartStatusDto.decode(readValue(buffer)!);
       default:
         return super.readValueOfType(type, buffer);
     }
@@ -608,14 +730,18 @@ class WearerLinkHostApi {
   /// Android: RemoteActivityHelper (both directions, foreground).
   /// iOS phone->watch: HealthKit workout launch only; throws
   /// 'unsupported' PlatformException otherwise.
-  Future<void> launchCompanion() async {
+  ///
+  /// [route]/[argsJson] reach the launched app as a data event on the
+  /// reserved '/__wllaunch' path (queued, so it survives the launch
+  /// gap); on Android they are also appended to the launch URI.
+  Future<void> launchCompanion(String? route, String? argsJson) async {
     final pigeonVar_channelName = 'dev.flutter.pigeon.wearer_link.WearerLinkHostApi.launchCompanion$pigeonVar_messageChannelSuffix';
     final pigeonVar_channel = BasicMessageChannel<Object?>(
       pigeonVar_channelName,
       pigeonChannelCodec,
       binaryMessenger: pigeonVar_binaryMessenger,
     );
-    final Future<Object?> pigeonVar_sendFuture = pigeonVar_channel.send(null);
+    final Future<Object?> pigeonVar_sendFuture = pigeonVar_channel.send(<Object?>[route, argsJson]);
     final pigeonVar_replyList = await pigeonVar_sendFuture as List<Object?>?;
 
     _extractReplyValueOrThrow(
@@ -624,6 +750,47 @@ class WearerLinkHostApi {
         isNullValid: true,
     )
     ;
+  }
+
+  /// Connected counterpart nodes with their platform facts.
+  Future<List<WearerNodeDto>> getNodes() async {
+    final pigeonVar_channelName = 'dev.flutter.pigeon.wearer_link.WearerLinkHostApi.getNodes$pigeonVar_messageChannelSuffix';
+    final pigeonVar_channel = BasicMessageChannel<Object?>(
+      pigeonVar_channelName,
+      pigeonChannelCodec,
+      binaryMessenger: pigeonVar_binaryMessenger,
+    );
+    final Future<Object?> pigeonVar_sendFuture = pigeonVar_channel.send(null);
+    final pigeonVar_replyList = await pigeonVar_sendFuture as List<Object?>?;
+
+    final Object? pigeonVar_replyValue = _extractReplyValueOrThrow(
+        pigeonVar_replyList,
+        pigeonVar_channelName,
+        isNullValid: false,
+    )
+    ;
+    return (pigeonVar_replyValue! as List<Object?>).cast<WearerNodeDto>();
+  }
+
+  /// The counterpart's vitals via the built-in '/__wlstatus' responder.
+  /// Requires a reachable counterpart running wearer_link >= 0.5.
+  Future<CounterpartStatusDto> getCounterpartStatus(String? nodeId) async {
+    final pigeonVar_channelName = 'dev.flutter.pigeon.wearer_link.WearerLinkHostApi.getCounterpartStatus$pigeonVar_messageChannelSuffix';
+    final pigeonVar_channel = BasicMessageChannel<Object?>(
+      pigeonVar_channelName,
+      pigeonChannelCodec,
+      binaryMessenger: pigeonVar_binaryMessenger,
+    );
+    final Future<Object?> pigeonVar_sendFuture = pigeonVar_channel.send(<Object?>[nodeId]);
+    final pigeonVar_replyList = await pigeonVar_sendFuture as List<Object?>?;
+
+    final Object? pigeonVar_replyValue = _extractReplyValueOrThrow(
+        pigeonVar_replyList,
+        pigeonVar_channelName,
+        isNullValid: false,
+    )
+    ;
+    return pigeonVar_replyValue! as CounterpartStatusDto;
   }
 
   /// Drain events persisted while the app was dead. Called by the Dart

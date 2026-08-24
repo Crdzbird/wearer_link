@@ -261,9 +261,24 @@ extension WearerLinkPlugin: WearerLinkHostApi {
     BackgroundDispatcher.shared.clear()
   }
 
+  func getNodes(completion: @escaping (Result<[WearerNodeDto], Error>) -> Void) {
+    completion(.success(bridge.getNodes()))
+  }
+
+  func getCounterpartStatus(
+    nodeId: String?,
+    completion: @escaping (Result<CounterpartStatusDto, Error>) -> Void
+  ) {
+    bridge.getCounterpartStatus(completion: completion)
+  }
+
   /// iOS can only launch the watch app for a HealthKit workout session —
   /// an OS policy, surfaced as a typed error everywhere else.
-  func launchCompanion(completion: @escaping (Result<Void, Error>) -> Void) {
+  func launchCompanion(
+    route: String?,
+    argsJson: String?,
+    completion: @escaping (Result<Void, Error>) -> Void
+  ) {
     guard HKHealthStore.isHealthDataAvailable() else {
       completion(.failure(PigeonError(
         code: "unsupported",
@@ -277,6 +292,16 @@ extension WearerLinkPlugin: WearerLinkHostApi {
     HKHealthStore().startWatchApp(with: configuration) { success, error in
       DispatchQueue.main.async {
         if success {
+          if route != nil || argsJson != nil {
+            // Queued delivery survives the launch gap; the watch app reads
+            // it from its onLaunchIntent callback.
+            let payload: [String: Any?] = ["route": route, "args": argsJson]
+            if let data = try? JSONSerialization.data(
+              withJSONObject: payload.compactMapValues { $0 }) {
+              try? self.bridge.transferData(
+                path: WatchSessionBridge.launchPathForPlugin, payload: data)
+            }
+          }
           completion(.success(()))
         } else {
           completion(.failure(PigeonError(

@@ -18,8 +18,16 @@ Working prototype.
 * watchOS: `WearerLinkWatch` Swift package for native watch apps
   (activate/send/sync/transfer/wake, startup event buffering).
 
-## 0.5.0 (in progress)
+## 0.5.0
 
+M6: developer-experience core.
+
+* `getNodes()` (id, display name, isNearby) and `getCounterpartStatus()`
+  — battery/model/OS served by a built-in native responder on all three
+  sides (sim-pair verified; no app code needed on the counterpart).
+* `launchCompanion(route:, args:)` — the launched app receives them on the
+  new `launchIntents` stream (queued transfer, survives the launch gap;
+  Android also embeds them in the launch URI). watchOS: `onLaunchIntent`.
 * Path router: `on('/workout/*', handler)` / `onRequestPath` — exact and
   trailing-wildcard routes, most-specific match wins, request routes take
   precedence over the global handler.

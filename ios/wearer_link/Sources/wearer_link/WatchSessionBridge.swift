@@ -1,6 +1,7 @@
 import Flutter
 import Foundation
 import HealthKit
+import UIKit
 import WatchConnectivity
 
 /// Envelope keys shared with the watchOS companion library.
@@ -17,6 +18,12 @@ enum Envelope {
   static let kindFile = 2
   static let kindRequest = 3
   static let kindStream = 4
+
+  /// Built-in counterpart-vitals responder (request path).
+  static let statusPath = "/__wlstatus"
+
+  /// Reserved data path carrying launchCompanion route/args.
+  static let launchPath = "/__wllaunch"
 
   /// Oversized transferData payloads travel as files whose path carries
   /// this marker; the receiver restores them into plain data events.
@@ -41,6 +48,9 @@ enum Envelope {
 final class WatchSessionBridge: NSObject {
   static let shared = WatchSessionBridge()
 
+  /// Reserved launch-intent path, exposed for the plugin's launch flow.
+  static let launchPathForPlugin = Envelope.launchPath
+
   /// Set on the main thread by the plugin; called on the main thread.
   var liveDispatcher: ((WearerEventDto) -> Void)?
 
@@ -59,6 +69,8 @@ final class WatchSessionBridge: NSObject {
 
   func activate() {
     guard WCSession.isSupported() else { return }
+    // Needed for the built-in /__wlstatus vitals responder.
+    UIDevice.current.isBatteryMonitoringEnabled = true
     let session = WCSession.default
     session.delegate = self
     if session.activationState != .activated {
@@ -180,6 +192,69 @@ final class WatchSessionBridge: NSObject {
     }
     WCSession.default.transferUserInfo(
       envelope(path: path, payload: payload, kind: Envelope.kindData))
+  }
+
+  func getNodes() -> [WearerNodeDto] {
+    let session = WCSession.default
+    guard WCSession.isSupported(), session.isPaired else { return [] }
+    return [
+      WearerNodeDto(
+        id: "watch",
+        displayName: "Apple Watch",
+        isNearby: session.isReachable)
+    ]
+  }
+
+  /// Ask the watch's built-in /__wlstatus responder for its vitals.
+  func getCounterpartStatus(completion: @escaping (Result<CounterpartStatusDto, Error>) -> Void) {
+    let session = WCSession.default
+    guard session.activationState == .activated, session.isReachable else {
+      completion(.failure(PigeonError(
+        code: "unreachable", message: "Watch is not reachable.", details: nil)))
+      return
+    }
+    session.sendMessage(
+      envelope(path: Envelope.statusPath, payload: Data(), kind: Envelope.kindRequest),
+      replyHandler: { reply in
+        DispatchQueue.main.async {
+          guard
+            let data = reply[Envelope.replyPayload] as? Data,
+            let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+          else {
+            let reason = reply[Envelope.replyError] as? String ?? "malformed reply"
+            completion(.failure(PigeonError(
+              code: "noHandler",
+              message: "Counterpart status probe failed "
+                + "(older WearerLinkWatch on the watch?): \(reason)",
+              details: nil)))
+            return
+          }
+          completion(.success(CounterpartStatusDto(
+            batteryPercent: Int64(json["battery"] as? Int ?? -1),
+            isCharging: json["charging"] as? Bool ?? false,
+            model: json["model"] as? String ?? "unknown",
+            osVersion: json["os"] as? String ?? "unknown")))
+        }
+      },
+      errorHandler: { error in
+        DispatchQueue.main.async {
+          completion(.failure(PigeonError(code: "sendFailed", message: "\(error)", details: nil)))
+        }
+      })
+  }
+
+  /// This device's vitals, serving inbound /__wlstatus probes.
+  func localStatusJson() -> Data {
+    let device = UIDevice.current
+    let level = device.batteryLevel
+    let charging = device.batteryState == .charging || device.batteryState == .full
+    let payload: [String: Any] = [
+      "battery": level < 0 ? -1 : Int(level * 100),
+      "charging": charging,
+      "model": device.model,
+      "os": "iOS \(device.systemVersion)",
+    ]
+    return (try? JSONSerialization.data(withJSONObject: payload)) ?? Data()
   }
 
   var deliveryEnabled: Bool {
@@ -323,6 +398,12 @@ extension WatchSessionBridge: WCSessionDelegate {
   ) {
     switch message[Envelope.kind] as? Int {
     case Envelope.kindRequest:
+      if (message[Envelope.path] as? String) == Envelope.statusPath {
+        // Built-in vitals responder: device facts, no app involvement,
+        // and deliberately outside the delivery gate.
+        replyHandler([Envelope.replyPayload: localStatusJson()])
+        return
+      }
       guard deliveryEnabled else {
         replyHandler([StreamRegistry.Frame.err: "deliveryDisabled"])
         return

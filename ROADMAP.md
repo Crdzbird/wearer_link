@@ -95,7 +95,7 @@ await wearer.sendMessage('/cmd', bytes, queueIfUnreachable: true);
   relative to live messages).
 - Effort: S. Pure Dart.
 
-### 6.5 Rich node info
+### 6.5 Rich node info ✅ shipped
 
 ```dart
 final nodes = await wearer.getNodes();
@@ -107,7 +107,7 @@ final nodes = await wearer.getNodes();
 - Pigeon: `getNodes() -> List<WearerNodeDto>`.
 - Effort: S.
 
-### 6.6 Launch with intent
+### 6.6 Launch with intent ✅ shipped
 
 ```dart
 await wearer.launchCompanion(route: '/workout', args: {'id': 42});
@@ -122,7 +122,7 @@ await wearer.launchCompanion(route: '/workout', args: {'id': 42});
 - Watch lib: `onLaunchIntent` callback.
 - Effort: S–M.
 
-### 6.7 Counterpart status
+### 6.7 Counterpart status ✅ shipped
 
 ```dart
 final status = await wearer.getCounterpartStatus();
@@ -245,6 +245,7 @@ The simulator-untestable behaviors, tracked as a table in this file:
 | Blob (oversized transferData) delivery | ⬜ | ⬜ |
 | Streams on hardware | ⬜ | ⬜ |
 | RPC happy path on hardware | ⬜ (sim-verified iOS) | ⬜ |
+| Launch-with-intent foreground open | ⬜ | n/a (workout-only) |
 | Complication push budget behavior | n/a | ⬜ |
 | Tile/complication surface update | ⬜ needs app with tile | n/a |
 | Store conflict under real latency | ⬜ | ⬜ |

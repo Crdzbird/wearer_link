@@ -205,6 +205,74 @@ class WearerCapabilities {
       'maxMessageBytes: $maxMessageBytes)';
 }
 
+/// A connected counterpart node.
+class WearerNode {
+  const WearerNode({
+    required this.id,
+    required this.displayName,
+    required this.isNearby,
+  });
+
+  factory WearerNode.fromDto(WearerNodeDto dto) => WearerNode(
+        id: dto.id,
+        displayName: dto.displayName,
+        isNearby: dto.isNearby,
+      );
+
+  final String id;
+
+  /// Human-readable device name where the platform provides one.
+  final String displayName;
+
+  /// Android: directly connected (Bluetooth/Wi-Fi), not via cloud relay.
+  /// iOS: mirrors reachability.
+  final bool isNearby;
+
+  @override
+  String toString() => 'WearerNode($displayName, $id, nearby: $isNearby)';
+}
+
+/// The counterpart device's vitals (see `getCounterpartStatus`).
+class WearerCounterpartStatus {
+  const WearerCounterpartStatus({
+    required this.batteryPercent,
+    required this.isCharging,
+    required this.model,
+    required this.osVersion,
+  });
+
+  factory WearerCounterpartStatus.fromDto(CounterpartStatusDto dto) =>
+      WearerCounterpartStatus(
+        batteryPercent: dto.batteryPercent,
+        isCharging: dto.isCharging,
+        model: dto.model,
+        osVersion: dto.osVersion,
+      );
+
+  /// 0–100, or -1 when the counterpart could not read it.
+  final int batteryPercent;
+  final bool isCharging;
+  final String model;
+  final String osVersion;
+
+  @override
+  String toString() =>
+      'WearerCounterpartStatus($model $osVersion, $batteryPercent%'
+      '${isCharging ? ', charging' : ''})';
+}
+
+/// A companion-launch intent delivered to the launched app
+/// (see `launchCompanion(route:, args:)`).
+class WearerLaunchIntent {
+  const WearerLaunchIntent({this.route, this.args});
+
+  final String? route;
+  final Map<String, Object?>? args;
+
+  @override
+  String toString() => 'WearerLaunchIntent($route, $args)';
+}
+
 /// Error codes surfaced by the native side.
 enum WearerErrorCode {
   /// The platform forbids the operation (e.g. launching a watchOS app

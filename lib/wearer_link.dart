@@ -54,6 +54,7 @@ class WearerLink {
   final _messages = StreamController<WearerEvent>.broadcast();
   final _dataEvents = StreamController<WearerEvent>.broadcast();
   final _fileEvents = StreamController<WearerEvent>.broadcast();
+  final _launchIntents = StreamController<WearerLaunchIntent>.broadcast();
   final _connection = StreamController<WearerCompanionStatus>.broadcast();
 
   bool _drained = false;
@@ -395,7 +396,40 @@ class WearerLink {
   /// foreground. iOS: launching the watch app requires a HealthKit workout
   /// session (throws [WearerErrorCode.unsupported] otherwise); a watch can
   /// background-wake the iPhone app simply by sending a message.
-  Future<void> launchCompanion() => _guard(() => _host.launchCompanion());
+  ///
+  /// [route]/[args] reach the launched app on its [launchIntents] stream
+  /// (delivered as a queued transfer, so they survive the launch gap).
+  Future<void> launchCompanion({String? route, Map<String, Object?>? args}) =>
+      _guard(
+        () => _host.launchCompanion(
+          route,
+          args == null ? null : jsonEncode(args),
+        ),
+      );
+
+  /// Launch intents from `launchCompanion(route:, args:)` on the
+  /// counterpart — the launched app subscribes here to navigate.
+  Stream<WearerLaunchIntent> get launchIntents {
+    _scheduleDrain();
+    return _launchIntents.stream;
+  }
+
+  /// Connected counterpart nodes with their platform facts.
+  Future<List<WearerNode>> getNodes() => _guard(
+        () async => [
+          for (final dto in await _host.getNodes()) WearerNode.fromDto(dto),
+        ],
+      );
+
+  /// The counterpart device's vitals (battery, model, OS), answered by a
+  /// built-in responder on the other side — no app code needed there.
+  /// Requires a reachable counterpart running wearer_link >= 0.5.
+  Future<WearerCounterpartStatus> getCounterpartStatus({String? nodeId}) =>
+      _guard(
+        () async => WearerCounterpartStatus.fromDto(
+          await _host.getCounterpartStatus(nodeId),
+        ),
+      );
 
   /// Replay events persisted while the app was not running. Called
   /// automatically on first listen of [messages]/[dataEvents]; safe to call
@@ -424,6 +458,11 @@ class WearerLink {
     if (_seenIds.length > _seenIdsCap) {
       _seenIds.remove(_seenIds.first); // Set keeps insertion order: drop oldest
     }
+    if (dto.path == '/__wllaunch') {
+      // Reserved plugin path: surface as a launch intent, not a data event.
+      _launchIntents.add(_parseLaunchIntent(dto.payload));
+      return;
+    }
     final event = WearerEvent.fromDto(dto);
     _Route.bestMatch(_routes, event.path)?.call(event);
     switch (event.kind) {
@@ -433,6 +472,21 @@ class WearerLink {
         _dataEvents.add(event);
       case WearerEventKind.file:
         _fileEvents.add(event);
+    }
+  }
+
+  static WearerLaunchIntent _parseLaunchIntent(Uint8List payload) {
+    try {
+      final decoded = jsonDecode(utf8.decode(payload)) as Map<String, Object?>;
+      final rawArgs = decoded['args'];
+      return WearerLaunchIntent(
+        route: decoded['route'] as String?,
+        args: rawArgs is String
+            ? jsonDecode(rawArgs) as Map<String, Object?>?
+            : rawArgs as Map<String, Object?>?,
+      );
+    } catch (_) {
+      return const WearerLaunchIntent();
     }
   }
 

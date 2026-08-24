@@ -48,6 +48,12 @@ object WireProtocol {
   const val KEY_ID = "id"
   const val KEY_TIMESTAMP = "ts"
 
+  /** Built-in counterpart-vitals responder (request path). */
+  const val STATUS_PATH = "/__wlstatus"
+
+  /** Reserved data path carrying launchCompanion route/args. */
+  const val LAUNCH_PATH = "/__wllaunch"
+
   /** Manifest meta-data key holding the deep-link URI used by launchCompanion. */
   const val LAUNCH_URI_METADATA = "com.crdzbird.wearer_link.launchUri"
 

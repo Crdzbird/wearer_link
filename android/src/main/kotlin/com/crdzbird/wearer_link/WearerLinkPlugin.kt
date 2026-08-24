@@ -127,8 +127,23 @@ class WearerLinkPlugin : FlutterPlugin, WearerLinkHostApi {
     launchWith(callback) { it.transferData(path, payload) }
   }
 
-  override fun launchCompanion(callback: (Result<Unit>) -> Unit) {
-    launchWith(callback) { it.launchCompanion(mainExecutor) }
+  override fun launchCompanion(
+    route: String?,
+    argsJson: String?,
+    callback: (Result<Unit>) -> Unit,
+  ) {
+    launchWith(callback) { it.launchCompanion(mainExecutor, route, argsJson) }
+  }
+
+  override fun getNodes(callback: (Result<List<WearerNodeDto>>) -> Unit) {
+    launchWith(callback) { it.getNodes() }
+  }
+
+  override fun getCounterpartStatus(
+    nodeId: String?,
+    callback: (Result<CounterpartStatusDto>) -> Unit,
+  ) {
+    launchWith(callback) { it.getCounterpartStatus(nodeId) }
   }
 
   override fun transferFile(

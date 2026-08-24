@@ -62,7 +62,21 @@ class _FakeHost extends WearerLinkHostApi {
       synced.add((path, payload));
 
   @override
-  Future<void> launchCompanion() async {}
+  Future<void> launchCompanion(String? route, String? argsJson) async {}
+
+  @override
+  Future<List<WearerNodeDto>> getNodes() async => [
+        WearerNodeDto(id: 'node-1', displayName: 'Watch', isNearby: true),
+      ];
+
+  @override
+  Future<CounterpartStatusDto> getCounterpartStatus(String? nodeId) async =>
+      CounterpartStatusDto(
+        batteryPercent: 55,
+        isCharging: true,
+        model: 'Test Watch',
+        osVersion: '1.2',
+      );
 
   @override
   Future<List<WearerEventDto>> drainPendingEvents() async {

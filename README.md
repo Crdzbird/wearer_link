@@ -38,6 +38,18 @@ await wearer.transferData('/log', bytes);   // queued FIFO, any size (big
                                             // — that route needs a
                                             // reachable node on Android)
 
+// Day-one ergonomics
+wearer.on('/workout/*', (e) => ...);            // path router (exact + wildcard)
+wearer.registerCodec<Workout>(WearerJsonCodec(Workout.fromJson));
+await wearer.sendTyped('/workout', workout);    // typed send/receive/RPC
+await wearer.whenReachable(timeout: ...);       // wait for the link
+final nodes = await wearer.getNodes();          // names + isNearby
+final vitals = await wearer.getCounterpartStatus(); // battery/model/OS,
+                                                // answered natively on the
+                                                // other side
+await wearer.launchCompanion(route: '/workout', args: {'id': 42});
+wearer.launchIntents.listen((i) => ...);        // launched app navigates
+
 // Request/response RPC (10s default timeout; counterpart must answer)
 final reply = await wearer.sendRequest('/echo', bytes);
 wearer.setRequestHandler((req) async => answerFor(req)); // answer their requests

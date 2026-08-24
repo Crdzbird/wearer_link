@@ -89,6 +89,11 @@ class WearerLinkListenerService : WearableListenerService() {
    */
   override fun onRequest(nodeId: String, path: String, request: ByteArray): Task<ByteArray>? {
     if (!path.startsWith(WireProtocol.REQUEST_PREFIX)) return null
+    if (WireProtocol.userPathOfRequest(path) == WireProtocol.STATUS_PATH) {
+      // Built-in vitals responder: device facts, no app involvement, and
+      // deliberately outside the delivery gate.
+      return Tasks.forResult(statusJson())
+    }
     if (!DeliveryGate.isEnabled(this)) {
       return Tasks.forException(
         IllegalStateException("wearer_link: delivery is disabled on this device"),
@@ -184,6 +189,19 @@ class WearerLinkListenerService : WearableListenerService() {
         filePath = file.absolutePath,
       ),
     )
+  }
+
+  private fun statusJson(): ByteArray {
+    val battery = getSystemService(BATTERY_SERVICE) as android.os.BatteryManager
+    val percent =
+      battery.getIntProperty(android.os.BatteryManager.BATTERY_PROPERTY_CAPACITY)
+    return org.json.JSONObject()
+      .put("battery", if (percent in 0..100) percent else -1)
+      .put("charging", battery.isCharging)
+      .put("model", "${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}")
+      .put("os", "Android ${android.os.Build.VERSION.RELEASE}")
+      .toString()
+      .toByteArray(Charsets.UTF_8)
   }
 
   private fun fileFor(wirePath: String): File {

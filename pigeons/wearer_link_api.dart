@@ -154,6 +154,44 @@ class WearerCapabilitiesDto {
   int maxMessageBytes;
 }
 
+/// A connected counterpart node.
+class WearerNodeDto {
+  WearerNodeDto({
+    required this.id,
+    required this.displayName,
+    required this.isNearby,
+  });
+
+  String id;
+
+  /// Human-readable device name where the platform provides one.
+  String displayName;
+
+  /// Android: Node.isNearby (direct Bluetooth/Wi-Fi link, not cloud).
+  /// iOS: mirrors reachability (the API has no separate notion).
+  bool isNearby;
+}
+
+/// The counterpart device's vitals, served by a built-in handler on the
+/// other side — works even before the counterpart app registers anything.
+class CounterpartStatusDto {
+  CounterpartStatusDto({
+    required this.batteryPercent,
+    required this.isCharging,
+    required this.model,
+    required this.osVersion,
+  });
+
+  /// 0–100, or -1 when the counterpart could not read it.
+  int batteryPercent;
+
+  bool isCharging;
+
+  String model;
+
+  String osVersion;
+}
+
 /// Dart -> native.
 @HostApi()
 abstract class WearerLinkHostApi {
@@ -201,8 +239,21 @@ abstract class WearerLinkHostApi {
   /// Android: RemoteActivityHelper (both directions, foreground).
   /// iOS phone->watch: HealthKit workout launch only; throws
   /// 'unsupported' PlatformException otherwise.
+  ///
+  /// [route]/[argsJson] reach the launched app as a data event on the
+  /// reserved '/__wllaunch' path (queued, so it survives the launch
+  /// gap); on Android they are also appended to the launch URI.
   @async
-  void launchCompanion();
+  void launchCompanion(String? route, String? argsJson);
+
+  /// Connected counterpart nodes with their platform facts.
+  @async
+  List<WearerNodeDto> getNodes();
+
+  /// The counterpart's vitals via the built-in '/__wlstatus' responder.
+  /// Requires a reachable counterpart running wearer_link >= 0.5.
+  @async
+  CounterpartStatusDto getCounterpartStatus(String? nodeId);
 
   /// Drain events persisted while the app was dead. Called by the Dart
   /// facade on startup; each drained event is also removed from the store.

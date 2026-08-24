@@ -5,6 +5,7 @@
 
 import Foundation
 import WatchConnectivity
+import WatchKit
 
 /// Watch-side counterpart of the wearer_link Flutter plugin.
 ///
@@ -85,6 +86,11 @@ public final class WearerLinkWatch: NSObject {
   /// refused. Main queue.
   public var onIncomingStream: ((WatchStream) -> Void)?
 
+  /// Route/args from the phone's `launchCompanion(route:, args:)`,
+  /// delivered on the main queue (queued transfer — survives the launch
+  /// gap, so subscribe early in App.init).
+  public var onLaunchIntent: ((String?, [String: Any]?) -> Void)?
+
   // Open streams by id. Main-queue confined.
   private var streams: [String: WatchStream] = [:]
 
@@ -108,6 +114,8 @@ public final class WearerLinkWatch: NSObject {
   /// background deliveries reach the app.
   public func activate() {
     guard WCSession.isSupported() else { return }
+    // Needed for the built-in /__wlstatus vitals responder.
+    WKInterfaceDevice.current().isBatteryMonitoringEnabled = true
     let session = WCSession.default
     session.delegate = self
     if session.activationState != .activated {
@@ -387,6 +395,21 @@ public final class WearerLinkWatch: NSObject {
 
   private func handleInbound(_ dictionary: [String: Any], fileURL: URL? = nil) {
     guard let path = dictionary[Envelope.path] as? String else { return }
+    if path == Envelope.launchPath {
+      // Reserved plugin path: surface as a launch intent, not an event.
+      let payload = dictionary[Envelope.payload] as? Data
+      let decoded = payload.flatMap {
+        (try? JSONSerialization.jsonObject(with: $0)) as? [String: Any]
+      }
+      let argsJson = decoded?["args"] as? String
+      let args = argsJson.flatMap {
+        (try? JSONSerialization.jsonObject(with: Data($0.utf8))) as? [String: Any]
+      }
+      DispatchQueue.main.async {
+        self.onLaunchIntent?(decoded?["route"] as? String, args)
+      }
+      return
+    }
     let payload = dictionary[Envelope.payload] as? Data
     if payload == nil && fileURL == nil { return }
     let millis = dictionary[Envelope.timestamp] as? Int64
@@ -435,6 +458,56 @@ public final class WearerLinkWatch: NSObject {
     /// Oversized transferData marker. CONTRACT: mirrored on iOS/Android.
     static let blobMarker = "/__wlblob"
     static let maxMessageBytes = 56 * 1024
+
+    /// Reserved plugin paths. CONTRACT: mirrored on iOS/Android.
+    static let statusPath = "/__wlstatus"
+    static let launchPath = "/__wllaunch"
+  }
+
+  private func localStatusJson() -> Data {
+    let device = WKInterfaceDevice.current()
+    let level = device.batteryLevel
+    let charging = device.batteryState == .charging || device.batteryState == .full
+    let payload: [String: Any] = [
+      "battery": level < 0 ? -1 : Int(level * 100),
+      "charging": charging,
+      "model": device.model,
+      "os": "watchOS \(device.systemVersion)",
+    ]
+    return (try? JSONSerialization.data(withJSONObject: payload)) ?? Data()
+  }
+
+  /// The phone's vitals via its built-in responder (battery, model, OS
+  /// as a JSON dictionary).
+  public func requestPhoneStatus(
+    completion: @escaping (Result<[String: Any], WearerError>) -> Void
+  ) {
+    let session = WCSession.default
+    guard session.activationState == .activated else {
+      completion(.failure(.notActivated))
+      return
+    }
+    guard session.isReachable else {
+      completion(.failure(.phoneUnreachable))
+      return
+    }
+    session.sendMessage(
+      envelope(path: Envelope.statusPath, payload: Data(), kind: Envelope.kindRequest),
+      replyHandler: { reply in
+        DispatchQueue.main.async {
+          if let data = reply[Envelope.replyPayload] as? Data,
+            let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] {
+            completion(.success(json))
+          } else {
+            completion(.failure(.sendFailed(NSError(
+              domain: "wearer_link", code: 3,
+              userInfo: [NSLocalizedDescriptionKey: "malformed status reply"]))))
+          }
+        }
+      },
+      errorHandler: { error in
+        DispatchQueue.main.async { completion(.failure(.sendFailed(error))) }
+      })
   }
 }
 
@@ -476,6 +549,11 @@ extension WearerLinkWatch: WCSessionDelegate {
       return
     }
     if (message[Envelope.kind] as? Int) == Envelope.kindRequest {
+      if (message[Envelope.path] as? String) == Envelope.statusPath {
+        // Built-in vitals responder: device facts, no app involvement.
+        replyHandler([Envelope.replyPayload: localStatusJson()])
+        return
+      }
       guard
         let path = message[Envelope.path] as? String,
         let payload = message[Envelope.payload] as? Data

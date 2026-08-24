@@ -219,6 +219,15 @@ class _HomePageState extends State<HomePage> {
                   child: const Text('Read sync'),
                 ),
                 FilledButton.tonal(
+                  onPressed: () => _run('status', () async {
+                    final nodes = await _link.getNodes();
+                    _append('nodes: $nodes');
+                    final status = await _link.getCounterpartStatus();
+                    _append('counterpart: $status');
+                  }),
+                  child: const Text('Status'),
+                ),
+                FilledButton.tonal(
                   onPressed: () => _run('stream', () async {
                     final stream = await _link.openStream('/live');
                     _append('stream open ${stream.id.substring(0, 8)}');

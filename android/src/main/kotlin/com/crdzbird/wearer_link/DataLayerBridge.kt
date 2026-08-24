@@ -319,7 +319,45 @@ class DataLayerBridge(private val context: Context) {
    *     android:name="com.crdzbird.wearer_link.launchUri"
    *     android:value="wearerlink://open" />
    */
-  suspend fun launchCompanion(mainExecutor: Executor) {
+  suspend fun getNodes(): List<WearerNodeDto> {
+    val connected = try {
+      nodeClient.connectedNodes.await()
+    } catch (e: Exception) {
+      throw FlutterError("unknown", "connectedNodes failed: $e", null)
+    }
+    return connected.map {
+      WearerNodeDto(id = it.id, displayName = it.displayName, isNearby = it.isNearby)
+    }
+  }
+
+  /** Ask the counterpart's built-in /__wlstatus responder for its vitals. */
+  suspend fun getCounterpartStatus(nodeId: String?): CounterpartStatusDto {
+    val node = singleTargetNode(nodeId)
+    val reply = try {
+      messageClient
+        .sendRequest(node, WireProtocol.requestPath(WireProtocol.STATUS_PATH), ByteArray(0))
+        .await()
+    } catch (e: Exception) {
+      throw FlutterError(
+        "noHandler",
+        "Counterpart status probe failed (older wearer_link on the other side?): $e",
+        null,
+      )
+    }
+    return try {
+      val json = org.json.JSONObject(String(reply, Charsets.UTF_8))
+      CounterpartStatusDto(
+        batteryPercent = json.optLong("battery", -1L),
+        isCharging = json.optBoolean("charging", false),
+        model = json.optString("model", "unknown"),
+        osVersion = json.optString("os", "unknown"),
+      )
+    } catch (e: Exception) {
+      throw FlutterError("unknown", "Malformed status reply: $e", null)
+    }
+  }
+
+  suspend fun launchCompanion(mainExecutor: Executor, route: String?, argsJson: String?) {
     val uri = launchUriFromManifest()
       ?: throw FlutterError(
         "launchFailed",
@@ -331,9 +369,13 @@ class DataLayerBridge(private val context: Context) {
     if (nodes.isEmpty()) {
       throw FlutterError("unreachable", "No reachable companion node.", null)
     }
+    val launchUri = Uri.parse(uri).buildUpon().apply {
+      route?.let { appendQueryParameter("route", it) }
+      argsJson?.let { appendQueryParameter("args", it) }
+    }.build()
     val intent = Intent(Intent.ACTION_VIEW)
       .addCategory(Intent.CATEGORY_BROWSABLE)
-      .setData(Uri.parse(uri))
+      .setData(launchUri)
     val helper = RemoteActivityHelper(context, mainExecutor)
     for (node in nodes) {
       try {
@@ -341,6 +383,15 @@ class DataLayerBridge(private val context: Context) {
       } catch (e: Exception) {
         throw FlutterError("launchFailed", "startRemoteActivity(${node.id}) failed: $e", null)
       }
+    }
+    if (route != null || argsJson != null) {
+      // Queued delivery survives the launch gap; the launched app reads it
+      // from its launchIntents stream.
+      val payload = org.json.JSONObject().apply {
+        put("route", route ?: org.json.JSONObject.NULL)
+        put("args", argsJson ?: org.json.JSONObject.NULL)
+      }
+      transferData(WireProtocol.LAUNCH_PATH, payload.toString().toByteArray(Charsets.UTF_8))
     }
   }
 

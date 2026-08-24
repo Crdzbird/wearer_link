@@ -417,6 +417,102 @@ struct WearerCapabilitiesDto: Hashable {
   }
 }
 
+/// A connected counterpart node.
+///
+/// Generated class from Pigeon that represents data sent in messages.
+struct WearerNodeDto: Hashable {
+  var id: String
+  /// Human-readable device name where the platform provides one.
+  var displayName: String
+  /// Android: Node.isNearby (direct Bluetooth/Wi-Fi link, not cloud).
+  /// iOS: mirrors reachability (the API has no separate notion).
+  var isNearby: Bool
+
+
+  // swift-format-ignore: AlwaysUseLowerCamelCase
+  static func fromList(_ pigeonVar_list: [Any?]) -> WearerNodeDto? {
+    let id = pigeonVar_list[0] as! String
+    let displayName = pigeonVar_list[1] as! String
+    let isNearby = pigeonVar_list[2] as! Bool
+
+    return WearerNodeDto(
+      id: id,
+      displayName: displayName,
+      isNearby: isNearby
+    )
+  }
+  func toList() -> [Any?] {
+    return [
+      id,
+      displayName,
+      isNearby,
+    ]
+  }
+  static func == (lhs: WearerNodeDto, rhs: WearerNodeDto) -> Bool {
+    if Swift.type(of: lhs) != Swift.type(of: rhs) {
+      return false
+    }
+    return deepEqualsMessages(lhs.id, rhs.id) && deepEqualsMessages(lhs.displayName, rhs.displayName) && deepEqualsMessages(lhs.isNearby, rhs.isNearby)
+  }
+
+  func hash(into hasher: inout Hasher) {
+    hasher.combine("WearerNodeDto")
+    deepHashMessages(value: id, hasher: &hasher)
+    deepHashMessages(value: displayName, hasher: &hasher)
+    deepHashMessages(value: isNearby, hasher: &hasher)
+  }
+}
+
+/// The counterpart device's vitals, served by a built-in handler on the
+/// other side — works even before the counterpart app registers anything.
+///
+/// Generated class from Pigeon that represents data sent in messages.
+struct CounterpartStatusDto: Hashable {
+  /// 0–100, or -1 when the counterpart could not read it.
+  var batteryPercent: Int64
+  var isCharging: Bool
+  var model: String
+  var osVersion: String
+
+
+  // swift-format-ignore: AlwaysUseLowerCamelCase
+  static func fromList(_ pigeonVar_list: [Any?]) -> CounterpartStatusDto? {
+    let batteryPercent = pigeonVar_list[0] as! Int64
+    let isCharging = pigeonVar_list[1] as! Bool
+    let model = pigeonVar_list[2] as! String
+    let osVersion = pigeonVar_list[3] as! String
+
+    return CounterpartStatusDto(
+      batteryPercent: batteryPercent,
+      isCharging: isCharging,
+      model: model,
+      osVersion: osVersion
+    )
+  }
+  func toList() -> [Any?] {
+    return [
+      batteryPercent,
+      isCharging,
+      model,
+      osVersion,
+    ]
+  }
+  static func == (lhs: CounterpartStatusDto, rhs: CounterpartStatusDto) -> Bool {
+    if Swift.type(of: lhs) != Swift.type(of: rhs) {
+      return false
+    }
+    return deepEqualsMessages(lhs.batteryPercent, rhs.batteryPercent) && deepEqualsMessages(lhs.isCharging, rhs.isCharging) && deepEqualsMessages(lhs.model, rhs.model) && deepEqualsMessages(lhs.osVersion, rhs.osVersion)
+  }
+
+  func hash(into hasher: inout Hasher) {
+    hasher.combine("CounterpartStatusDto")
+    deepHashMessages(value: batteryPercent, hasher: &hasher)
+    deepHashMessages(value: isCharging, hasher: &hasher)
+    deepHashMessages(value: model, hasher: &hasher)
+    deepHashMessages(value: osVersion, hasher: &hasher)
+  }
+}
+
 private class MessagesPigeonCodecReader: FlutterStandardReader {
   override func readValue(ofType type: UInt8) -> Any? {
     switch type {
@@ -444,6 +540,10 @@ private class MessagesPigeonCodecReader: FlutterStandardReader {
       return WearerEventDto.fromList(self.readValue() as! [Any?])
     case 134:
       return WearerCapabilitiesDto.fromList(self.readValue() as! [Any?])
+    case 135:
+      return WearerNodeDto.fromList(self.readValue() as! [Any?])
+    case 136:
+      return CounterpartStatusDto.fromList(self.readValue() as! [Any?])
     default:
       return super.readValue(ofType: type)
     }
@@ -469,6 +569,12 @@ private class MessagesPigeonCodecWriter: FlutterStandardWriter {
       super.writeValue(value.toList())
     } else if let value = value as? WearerCapabilitiesDto {
       super.writeByte(134)
+      super.writeValue(value.toList())
+    } else if let value = value as? WearerNodeDto {
+      super.writeByte(135)
+      super.writeValue(value.toList())
+    } else if let value = value as? CounterpartStatusDto {
+      super.writeByte(136)
       super.writeValue(value.toList())
     } else {
       super.writeValue(value)
@@ -524,7 +630,16 @@ protocol WearerLinkHostApi {
   /// Android: RemoteActivityHelper (both directions, foreground).
   /// iOS phone->watch: HealthKit workout launch only; throws
   /// 'unsupported' PlatformException otherwise.
-  func launchCompanion(completion: @escaping (Result<Void, Error>) -> Void)
+  ///
+  /// [route]/[argsJson] reach the launched app as a data event on the
+  /// reserved '/__wllaunch' path (queued, so it survives the launch
+  /// gap); on Android they are also appended to the launch URI.
+  func launchCompanion(route: String?, argsJson: String?, completion: @escaping (Result<Void, Error>) -> Void)
+  /// Connected counterpart nodes with their platform facts.
+  func getNodes(completion: @escaping (Result<[WearerNodeDto], Error>) -> Void)
+  /// The counterpart's vitals via the built-in '/__wlstatus' responder.
+  /// Requires a reachable counterpart running wearer_link >= 0.5.
+  func getCounterpartStatus(nodeId: String?, completion: @escaping (Result<CounterpartStatusDto, Error>) -> Void)
   /// Drain events persisted while the app was dead. Called by the Dart
   /// facade on startup; each drained event is also removed from the store.
   func drainPendingEvents(completion: @escaping (Result<[WearerEventDto], Error>) -> Void)
@@ -732,10 +847,17 @@ class WearerLinkHostApiSetup {
     /// Android: RemoteActivityHelper (both directions, foreground).
     /// iOS phone->watch: HealthKit workout launch only; throws
     /// 'unsupported' PlatformException otherwise.
+    ///
+    /// [route]/[argsJson] reach the launched app as a data event on the
+    /// reserved '/__wllaunch' path (queued, so it survives the launch
+    /// gap); on Android they are also appended to the launch URI.
     let launchCompanionChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.wearer_link.WearerLinkHostApi.launchCompanion\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
     if let api = api {
-      launchCompanionChannel.setMessageHandler { _, reply in
-        api.launchCompanion { result in
+      launchCompanionChannel.setMessageHandler { message, reply in
+        let args = message as! [Any?]
+        let routeArg: String? = nilOrValue(args[0])
+        let argsJsonArg: String? = nilOrValue(args[1])
+        api.launchCompanion(route: routeArg, argsJson: argsJsonArg) { result in
           switch result {
           case .success:
             reply(wrapResult(nil))
@@ -746,6 +868,41 @@ class WearerLinkHostApiSetup {
       }
     } else {
       launchCompanionChannel.setMessageHandler(nil)
+    }
+    /// Connected counterpart nodes with their platform facts.
+    let getNodesChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.wearer_link.WearerLinkHostApi.getNodes\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+    if let api = api {
+      getNodesChannel.setMessageHandler { _, reply in
+        api.getNodes { result in
+          switch result {
+          case .success(let res):
+            reply(wrapResult(res))
+          case .failure(let error):
+            reply(wrapError(error))
+          }
+        }
+      }
+    } else {
+      getNodesChannel.setMessageHandler(nil)
+    }
+    /// The counterpart's vitals via the built-in '/__wlstatus' responder.
+    /// Requires a reachable counterpart running wearer_link >= 0.5.
+    let getCounterpartStatusChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.wearer_link.WearerLinkHostApi.getCounterpartStatus\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+    if let api = api {
+      getCounterpartStatusChannel.setMessageHandler { message, reply in
+        let args = message as! [Any?]
+        let nodeIdArg: String? = nilOrValue(args[0])
+        api.getCounterpartStatus(nodeId: nodeIdArg) { result in
+          switch result {
+          case .success(let res):
+            reply(wrapResult(res))
+          case .failure(let error):
+            reply(wrapError(error))
+          }
+        }
+      }
+    } else {
+      getCounterpartStatusChannel.setMessageHandler(nil)
     }
     /// Drain events persisted while the app was dead. Called by the Dart
     /// facade on startup; each drained event is also removed from the store.

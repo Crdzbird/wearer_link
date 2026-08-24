@@ -458,6 +458,109 @@ data class WearerCapabilitiesDto (
     return result
   }
 }
+
+/**
+ * A connected counterpart node.
+ *
+ * Generated class from Pigeon that represents data sent in messages.
+ */
+data class WearerNodeDto (
+  val id: String,
+  /** Human-readable device name where the platform provides one. */
+  val displayName: String,
+  /**
+   * Android: Node.isNearby (direct Bluetooth/Wi-Fi link, not cloud).
+   * iOS: mirrors reachability (the API has no separate notion).
+   */
+  val isNearby: Boolean
+)
+ {
+  companion object {
+    fun fromList(pigeonVar_list: List<Any?>): WearerNodeDto {
+      val id = pigeonVar_list[0] as String
+      val displayName = pigeonVar_list[1] as String
+      val isNearby = pigeonVar_list[2] as Boolean
+      return WearerNodeDto(id, displayName, isNearby)
+    }
+  }
+  fun toList(): List<Any?> {
+    return listOf(
+      id,
+      displayName,
+      isNearby,
+    )
+  }
+  override fun equals(other: Any?): Boolean {
+    if (other == null || other.javaClass != javaClass) {
+      return false
+    }
+    if (this === other) {
+      return true
+    }
+    val other = other as WearerNodeDto
+    return MessagesPigeonUtils.deepEquals(this.id, other.id) && MessagesPigeonUtils.deepEquals(this.displayName, other.displayName) && MessagesPigeonUtils.deepEquals(this.isNearby, other.isNearby)
+  }
+
+  override fun hashCode(): Int {
+    var result = javaClass.hashCode()
+    result = 31 * result + MessagesPigeonUtils.deepHash(this.id)
+    result = 31 * result + MessagesPigeonUtils.deepHash(this.displayName)
+    result = 31 * result + MessagesPigeonUtils.deepHash(this.isNearby)
+    return result
+  }
+}
+
+/**
+ * The counterpart device's vitals, served by a built-in handler on the
+ * other side — works even before the counterpart app registers anything.
+ *
+ * Generated class from Pigeon that represents data sent in messages.
+ */
+data class CounterpartStatusDto (
+  /** 0–100, or -1 when the counterpart could not read it. */
+  val batteryPercent: Long,
+  val isCharging: Boolean,
+  val model: String,
+  val osVersion: String
+)
+ {
+  companion object {
+    fun fromList(pigeonVar_list: List<Any?>): CounterpartStatusDto {
+      val batteryPercent = pigeonVar_list[0] as Long
+      val isCharging = pigeonVar_list[1] as Boolean
+      val model = pigeonVar_list[2] as String
+      val osVersion = pigeonVar_list[3] as String
+      return CounterpartStatusDto(batteryPercent, isCharging, model, osVersion)
+    }
+  }
+  fun toList(): List<Any?> {
+    return listOf(
+      batteryPercent,
+      isCharging,
+      model,
+      osVersion,
+    )
+  }
+  override fun equals(other: Any?): Boolean {
+    if (other == null || other.javaClass != javaClass) {
+      return false
+    }
+    if (this === other) {
+      return true
+    }
+    val other = other as CounterpartStatusDto
+    return MessagesPigeonUtils.deepEquals(this.batteryPercent, other.batteryPercent) && MessagesPigeonUtils.deepEquals(this.isCharging, other.isCharging) && MessagesPigeonUtils.deepEquals(this.model, other.model) && MessagesPigeonUtils.deepEquals(this.osVersion, other.osVersion)
+  }
+
+  override fun hashCode(): Int {
+    var result = javaClass.hashCode()
+    result = 31 * result + MessagesPigeonUtils.deepHash(this.batteryPercent)
+    result = 31 * result + MessagesPigeonUtils.deepHash(this.isCharging)
+    result = 31 * result + MessagesPigeonUtils.deepHash(this.model)
+    result = 31 * result + MessagesPigeonUtils.deepHash(this.osVersion)
+    return result
+  }
+}
 private open class MessagesPigeonCodec : StandardMessageCodec() {
   override fun readValueOfType(type: Byte, buffer: ByteBuffer): Any? {
     return when (type) {
@@ -491,6 +594,16 @@ private open class MessagesPigeonCodec : StandardMessageCodec() {
           WearerCapabilitiesDto.fromList(it)
         }
       }
+      135.toByte() -> {
+        return (readValue(buffer) as? List<Any?>)?.let {
+          WearerNodeDto.fromList(it)
+        }
+      }
+      136.toByte() -> {
+        return (readValue(buffer) as? List<Any?>)?.let {
+          CounterpartStatusDto.fromList(it)
+        }
+      }
       else -> super.readValueOfType(type, buffer)
     }
   }
@@ -518,6 +631,14 @@ private open class MessagesPigeonCodec : StandardMessageCodec() {
       }
       is WearerCapabilitiesDto -> {
         stream.write(134)
+        writeValue(stream, value.toList())
+      }
+      is WearerNodeDto -> {
+        stream.write(135)
+        writeValue(stream, value.toList())
+      }
+      is CounterpartStatusDto -> {
+        stream.write(136)
         writeValue(stream, value.toList())
       }
       else -> super.writeValue(stream, value)
@@ -574,8 +695,19 @@ interface WearerLinkHostApi {
    * Android: RemoteActivityHelper (both directions, foreground).
    * iOS phone->watch: HealthKit workout launch only; throws
    * 'unsupported' PlatformException otherwise.
+   *
+   * [route]/[argsJson] reach the launched app as a data event on the
+   * reserved '/__wllaunch' path (queued, so it survives the launch
+   * gap); on Android they are also appended to the launch URI.
    */
-  fun launchCompanion(callback: (Result<Unit>) -> Unit)
+  fun launchCompanion(route: String?, argsJson: String?, callback: (Result<Unit>) -> Unit)
+  /** Connected counterpart nodes with their platform facts. */
+  fun getNodes(callback: (Result<List<WearerNodeDto>>) -> Unit)
+  /**
+   * The counterpart's vitals via the built-in '/__wlstatus' responder.
+   * Requires a reachable counterpart running wearer_link >= 0.5.
+   */
+  fun getCounterpartStatus(nodeId: String?, callback: (Result<CounterpartStatusDto>) -> Unit)
   /**
    * Drain events persisted while the app was dead. Called by the Dart
    * facade on startup; each drained event is also removed from the store.
@@ -804,13 +936,54 @@ interface WearerLinkHostApi {
       run {
         val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.wearer_link.WearerLinkHostApi.launchCompanion$separatedMessageChannelSuffix", codec)
         if (api != null) {
-          channel.setMessageHandler { _, reply ->
-            api.launchCompanion{ result: Result<Unit> ->
+          channel.setMessageHandler { message, reply ->
+            val args = message as List<Any?>
+            val routeArg = args[0] as String?
+            val argsJsonArg = args[1] as String?
+            api.launchCompanion(routeArg, argsJsonArg) { result: Result<Unit> ->
               val error = result.exceptionOrNull()
               if (error != null) {
                 reply.reply(MessagesPigeonUtils.wrapError(error))
               } else {
                 reply.reply(MessagesPigeonUtils.wrapResult(null))
+              }
+            }
+          }
+        } else {
+          channel.setMessageHandler(null)
+        }
+      }
+      run {
+        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.wearer_link.WearerLinkHostApi.getNodes$separatedMessageChannelSuffix", codec)
+        if (api != null) {
+          channel.setMessageHandler { _, reply ->
+            api.getNodes{ result: Result<List<WearerNodeDto>> ->
+              val error = result.exceptionOrNull()
+              if (error != null) {
+                reply.reply(MessagesPigeonUtils.wrapError(error))
+              } else {
+                val data = result.getOrNull()
+                reply.reply(MessagesPigeonUtils.wrapResult(data))
+              }
+            }
+          }
+        } else {
+          channel.setMessageHandler(null)
+        }
+      }
+      run {
+        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.wearer_link.WearerLinkHostApi.getCounterpartStatus$separatedMessageChannelSuffix", codec)
+        if (api != null) {
+          channel.setMessageHandler { message, reply ->
+            val args = message as List<Any?>
+            val nodeIdArg = args[0] as String?
+            api.getCounterpartStatus(nodeIdArg) { result: Result<CounterpartStatusDto> ->
+              val error = result.exceptionOrNull()
+              if (error != null) {
+                reply.reply(MessagesPigeonUtils.wrapError(error))
+              } else {
+                val data = result.getOrNull()
+                reply.reply(MessagesPigeonUtils.wrapResult(data))
               }
             }
           }

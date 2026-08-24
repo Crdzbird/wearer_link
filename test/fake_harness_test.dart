@@ -328,6 +328,40 @@ void routerAndTypedTests() {
     );
   });
 
+  test('launchCompanion carries route/args to launchIntents', () async {
+    final (phone, watch) = WearerLinkFake.pair();
+    final intents = <WearerLaunchIntent>[];
+    watch.launchIntents.listen(intents.add);
+    await pumpEventQueue();
+
+    await phone.launchCompanion(route: '/workout', args: {'id': 42});
+    await pumpEventQueue();
+
+    expect(watch.companionLaunches, hasLength(1));
+    expect(intents.single.route, '/workout');
+    expect(intents.single.args, {'id': 42});
+  });
+
+  test('getNodes and getCounterpartStatus report the fake peer', () async {
+    final (phone, _) = WearerLinkFake.pair();
+    final node = (await phone.getNodes()).single;
+    expect(node.id, 'node-b');
+    expect(node.isNearby, isTrue);
+
+    final status = await phone.getCounterpartStatus();
+    expect(status.batteryPercent, 80);
+    expect(status.model, contains('wearOs'));
+
+    phone.setReachable(false);
+    await expectLater(
+      phone.getCounterpartStatus(),
+      throwsA(
+        isA<WearerLinkException>()
+            .having((e) => e.code, 'code', WearerErrorCode.unreachable),
+      ),
+    );
+  });
+
   test('whenReachable resolves on reconnect and times out honestly',
       () async {
     final (phone, _) = WearerLinkFake.pair();

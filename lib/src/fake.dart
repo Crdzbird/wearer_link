@@ -2,6 +2,7 @@
 // test seam from library code.
 // ignore_for_file: invalid_use_of_visible_for_testing_member
 
+import 'dart:convert';
 import 'dart:io';
 import 'dart:ui';
 
@@ -378,17 +379,41 @@ class _FakeHost extends WearerLinkHostApi {
   }
 
   @override
-  Future<void> launchCompanion() async {
+  Future<void> launchCompanion(String? route, String? argsJson) async {
     switch (platform) {
       case WearerFakePlatform.androidPhone:
       case WearerFakePlatform.wearOs:
         _requireReachable();
-        other.companionLaunches.add(DateTime.now());
       case WearerFakePlatform.iPhone:
-        // Workout-only launch: succeed, but background-style (recorded,
-        // nothing foregrounded).
-        other.companionLaunches.add(DateTime.now());
+        break; // workout-only launch: background-style, no reachability need
     }
+    other.companionLaunches.add(DateTime.now());
+    if (route != null || argsJson != null) {
+      final payload = Uint8List.fromList(
+        utf8.encode(jsonEncode({'route': route, 'args': argsJson})),
+      );
+      other.receive(_event(WearerEventKindDto.data, '/__wllaunch', payload));
+    }
+  }
+
+  @override
+  Future<List<WearerNodeDto>> getNodes() async => [
+        WearerNodeDto(
+          id: other.nodeId,
+          displayName: 'Fake ${other.platform.name}',
+          isNearby: wire.reachable,
+        ),
+      ];
+
+  @override
+  Future<CounterpartStatusDto> getCounterpartStatus(String? nodeId) async {
+    _requireReachable();
+    return CounterpartStatusDto(
+      batteryPercent: 80,
+      isCharging: false,
+      model: 'Fake ${other.platform.name}',
+      osVersion: 'fake-1.0',
+    );
   }
 
   @override
