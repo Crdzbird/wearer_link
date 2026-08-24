@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:wearer_link/wearer_link.dart';
 
 /// Runs in a headless isolate when an event arrives while the app is dead.
@@ -46,6 +47,11 @@ class _HomePageState extends State<HomePage> {
   WearerCompanionStatus? _status;
   int _counter = 0;
 
+  // Live transfer feedback for the photo/stream demos.
+  double? _transferProgress;
+  String? _transferLabel;
+  String? _receivedImagePath;
+
   @override
   void initState() {
     super.initState();
@@ -67,12 +73,15 @@ class _HomePageState extends State<HomePage> {
         ),
       )
       ..add(
-        _link.fileEvents.listen(
-          (e) => _append(
+        _link.fileEvents.listen((e) {
+          _append(
             'file ${e.path}: ${e.filePath}'
             '${e.deliveredWhileDead ? ' (replayed)' : ''}',
-          ),
-        ),
+          );
+          if (e.path == '/photo' && e.filePath != null) {
+            setState(() => _receivedImagePath = e.filePath);
+          }
+        }),
       )
       ..add(_link.connectionState.listen((s) => setState(() => _status = s)));
     _refreshStatus();
@@ -142,6 +151,34 @@ class _HomePageState extends State<HomePage> {
       _append('$label ok');
     } on WearerLinkException catch (e) {
       _append('$label failed: ${e.code.name} — ${e.message}');
+    }
+  }
+
+  /// Send [filePath] with live progress + throughput in the app bar area.
+  Future<void> _trackedSend(String path, String filePath, String label) async {
+    final started = DateTime.now();
+    final transfer = await _link.transferFileTracked(path, filePath);
+    setState(() {
+      _transferProgress = 0;
+      _transferLabel = label;
+    });
+    transfer.progress.listen((p) => setState(() => _transferProgress = p));
+    try {
+      await transfer.done;
+      final seconds =
+          DateTime.now().difference(started).inMilliseconds / 1000.0;
+      final mbps = seconds == 0
+          ? 0
+          : transfer.totalBytes / (1024 * 1024) / seconds;
+      _append(
+        '$label sent: ${transfer.totalBytes}B in '
+        '${seconds.toStringAsFixed(2)}s (${mbps.toStringAsFixed(2)} MB/s)',
+      );
+    } finally {
+      setState(() {
+        _transferProgress = null;
+        _transferLabel = null;
+      });
     }
   }
 
@@ -219,6 +256,35 @@ class _HomePageState extends State<HomePage> {
                   child: const Text('Read sync'),
                 ),
                 FilledButton.tonal(
+                  onPressed: () => _run('photo', () async {
+                    final picked = await ImagePicker().pickImage(
+                      source: ImageSource.gallery,
+                    );
+                    if (picked == null) {
+                      _append('photo: nothing picked');
+                      return;
+                    }
+                    await _trackedSend('/photo', picked.path, 'photo');
+                  }),
+                  child: const Text('Share photo'),
+                ),
+                FilledButton.tonal(
+                  onPressed: () => _run('streamfile', () async {
+                    // ~2MB generated file: demonstrates streaming any large
+                    // file with live progress + throughput.
+                    final file = File(
+                      '${Directory.systemTemp.path}/wearer_2mb.bin',
+                    );
+                    if (!file.existsSync()) {
+                      file.writeAsBytesSync(
+                        List.generate(2 * 1024 * 1024, (i) => i % 256),
+                      );
+                    }
+                    await _trackedSend('/bigfile', file.path, '2MB file');
+                  }),
+                  child: const Text('Stream file'),
+                ),
+                FilledButton.tonal(
                   onPressed: () => _run('store', () async {
                     await _link.store.set(
                       'demo',
@@ -291,6 +357,36 @@ class _HomePageState extends State<HomePage> {
                 ),
               ],
             ),
+            if (_transferProgress != null)
+              Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 8,
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'sending $_transferLabel '
+                      '${(_transferProgress! * 100).toStringAsFixed(0)}%',
+                    ),
+                    const SizedBox(height: 4),
+                    LinearProgressIndicator(value: _transferProgress),
+                  ],
+                ),
+              ),
+            if (_receivedImagePath != null)
+              Padding(
+                padding: const EdgeInsets.all(8),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: Image.file(
+                    File(_receivedImagePath!),
+                    height: 120,
+                    fit: BoxFit.cover,
+                  ),
+                ),
+              ),
             const Divider(),
             for (final line in _log)
               Padding(

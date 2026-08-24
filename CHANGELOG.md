@@ -20,6 +20,12 @@ Working prototype.
 
 ## 0.8.0
 
+* Example app: "Share photo" (image_picker -> tracked transfer -> progress
+  bar -> receiver thumbnail) and "Stream file" (2MB with live % and MB/s —
+  2.31 MB/s measured on the simulator pair). README gained recipes: photo
+  capture & share, MJPEG-style live viewfinder over streams, file-sharing
+  primitive decision table, large-file streaming with throughput.
+
 API review pass (pre-1.0 breaking renames, no deprecation shims since the
 package is unpublished):
 

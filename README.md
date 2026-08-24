@@ -261,6 +261,78 @@ loudly: an encrypted payload reaching a cipher-less side (or plaintext
 reaching a ciphered side) is dropped with a `diagnostics` entry, and
 requests fail with a typed error — ciphertext is never emitted as data.
 
+## Recipes
+
+### Sharing a file — which primitive?
+
+| Need | Use |
+|---|---|
+| Must arrive even if the other app is killed / out of range | `transferFile` (queued by the OS) |
+| Progress bar, live link available | `transferFileTracked` |
+| Not a file — big bytes in memory | `transferData` (size-unlimited) |
+| Live feed, lowest latency | `openStream` |
+
+### Photo capture & share
+
+```dart
+// Phone: capture (image_picker / camera) and send with progress
+final shot = await ImagePicker().pickImage(source: ImageSource.camera);
+final transfer = await wearer.transferFileTracked('/photo', shot!.path);
+transfer.progress.listen(updateProgressBar);
+await transfer.done;
+
+// Watch (Wear OS Flutter): render what arrives
+wearer.fileEvents.listen((e) {
+  if (e.path == '/photo') setState(() => image = File(e.filePath!));
+});
+```
+
+The bundled example app does exactly this ("Share photo": picker →
+tracked transfer → progress bar → thumbnail preview on the receiver).
+
+### Live video frames (MJPEG-style viewfinder)
+
+True codec streaming is app territory, but a live viewfinder is just
+ordered frames over a stream — and `WearerStream` guarantees order:
+
+```dart
+// Sender: camera frames -> JPEG -> stream (drop frames when behind)
+final stream = await wearer.openStream('/viewfinder');
+controller.startImageStream((frame) async {
+  if (busy) return;                       // frame dropping = low latency
+  busy = true;
+  stream.send(await frameToJpeg(frame, quality: 60)); // keep <= 32KB
+  busy = false;
+});
+
+// Receiver: newest frame wins
+wearer.incomingStreams.listen((s) {
+  if (s.path != '/viewfinder') return;
+  s.data.listen((jpeg) => setState(() => lastFrame = jpeg));
+});
+// ...Image.memory(lastFrame, gaplessPlayback: true)
+```
+
+Budget frames to the link: ~15–20KB JPEG at 10–15fps is comfortable on a
+direct Bluetooth/Wi-Fi hop; drop frames rather than queueing them. For
+**recorded** video, send the file with `transferFileTracked` and play it
+on arrival — don't re-invent a codec pipeline over messages.
+
+### Streaming large files with throughput
+
+```dart
+final transfer = await wearer.transferFileTracked('/backup', path);
+final started = DateTime.now();
+transfer.progress.listen((p) {
+  final secs = DateTime.now().difference(started).inMilliseconds / 1000;
+  show('${(p * 100).toStringAsFixed(0)}%  '
+      '${(transfer.totalBytes * p / 1048576 / secs).toStringAsFixed(1)} MB/s');
+});
+await transfer.done;
+```
+
+("Stream file" in the example app streams a generated 2MB file this way.)
+
 ## Streaming audio (recipe)
 
 `WearerStream` sustains ordered audio-sized chunking (the suite pushes
