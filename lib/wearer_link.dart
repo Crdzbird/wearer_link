@@ -43,6 +43,15 @@ class WearerLink {
 
   bool _drained = false;
 
+  /// Answers [sendRequest] calls from the counterpart.
+  Future<Uint8List> Function(WearerEvent request)? _requestHandler;
+
+  // Session-level dedup: delivery is at-least-once, so an event can reach
+  // the streams twice (e.g. live dispatch racing the startup replay). Ids
+  // are unique per event; remember the recent ones and drop repeats.
+  final _seenIds = <String>{};
+  static const _seenIdsCap = 512;
+
   /// Whether this device has a wearable stack at all
   /// (Google Play services / WatchConnectivity support).
   Future<bool> get isSupported => _guard(() => _host.isSupported());
@@ -80,8 +89,43 @@ class WearerLink {
   /// Send an interactive message. Requires a reachable counterpart;
   /// throws [WearerLinkException] with [WearerErrorCode.unreachable]
   /// otherwise. For guaranteed delivery use [transferData].
-  Future<void> sendMessage(String path, Uint8List payload) =>
-      _guard(() => _host.sendMessage(path, payload));
+  ///
+  /// Android delivers to every reachable capable node unless [nodeId]
+  /// narrows it to one; iOS has a single counterpart and ignores [nodeId].
+  Future<void> sendMessage(String path, Uint8List payload, {String? nodeId}) =>
+      _guard(() => _host.sendMessage(path, payload, nodeId));
+
+  /// Request/response round trip: resolves with the counterpart's reply.
+  ///
+  /// The counterpart must answer — a Flutter app via [setRequestHandler], a
+  /// native watch app via `WearerLinkWatch.shared.onRequest`. Requires a
+  /// reachable counterpart; [timeout] (default 10s) turns a hung round trip
+  /// into [WearerErrorCode.sendFailed].
+  Future<Uint8List> sendRequest(
+    String path,
+    Uint8List payload, {
+    String? nodeId,
+    Duration timeout = const Duration(seconds: 10),
+  }) =>
+      _guard(
+        () => _host.sendRequest(path, payload, nodeId).timeout(
+              timeout,
+              onTimeout: () => throw WearerLinkException(
+                WearerErrorCode.sendFailed,
+                'No reply within $timeout for $path',
+              ),
+            ),
+      );
+
+  /// Answer [sendRequest] calls from the counterpart. The handler's returned
+  /// bytes travel back as the reply; a thrown error rejects the request on
+  /// the sender's side. Requests need a live handler — while the app has
+  /// none, senders get an error, never a silent drop.
+  void setRequestHandler(
+    Future<Uint8List> Function(WearerEvent request)? handler,
+  ) {
+    _requestHandler = handler;
+  }
 
   /// JSON convenience over [sendMessage].
   Future<void> sendJson(String path, Map<String, Object?> json) =>
@@ -93,6 +137,16 @@ class WearerLink {
   Future<void> syncData(String path, Uint8List payload) =>
       _guard(() => _host.syncData(path, payload));
 
+  /// Latest value the counterpart synced for [path] — the current state
+  /// behind [dataEvents] — or null if it never synced one.
+  Future<Uint8List?> readSyncData(String path) =>
+      _guard(() => _host.readSyncData(path));
+
+  /// Remove the value this device synced for [path]. The counterpart's own
+  /// synced value is theirs to delete.
+  Future<void> deleteSyncData(String path) =>
+      _guard(() => _host.deleteSyncData(path));
+
   /// Queue [payload] for guaranteed background delivery — every call is
   /// delivered, in order, once the counterpart connects (Android urgent
   /// `DataClient` item / iOS `transferUserInfo`).
@@ -103,8 +157,8 @@ class WearerLink {
   /// as a [fileEvents] event. Android: ChannelClient — requires a reachable
   /// counterpart. iOS: `WCSession.transferFile` — queued and delivered when
   /// the counterpart next connects.
-  Future<void> transferFile(String path, String filePath) =>
-      _guard(() => _host.transferFile(path, filePath));
+  Future<void> transferFile(String path, String filePath, {String? nodeId}) =>
+      _guard(() => _host.transferFile(path, filePath, nodeId));
 
   /// Push fresh complication data to the watch face (iOS only).
   ///
@@ -191,6 +245,10 @@ class WearerLink {
   }
 
   void _dispatch(WearerEventDto dto) {
+    if (!_seenIds.add(dto.id)) return; // duplicate replay/live race
+    if (_seenIds.length > _seenIdsCap) {
+      _seenIds.remove(_seenIds.first); // Set keeps insertion order: drop oldest
+    }
     final event = WearerEvent.fromDto(dto);
     switch (event.kind) {
       case WearerEventKind.message:
@@ -221,6 +279,18 @@ class _WearerLinkFlutterApiImpl implements WearerLinkFlutterApi {
 
   @override
   void onMessage(WearerEventDto event) => _link._dispatch(event);
+
+  @override
+  Future<Uint8List> onRequest(WearerEventDto event) {
+    final handler = _link._requestHandler;
+    if (handler == null) {
+      throw PlatformException(
+        code: 'noHandler',
+        message: 'No request handler registered (setRequestHandler).',
+      );
+    }
+    return handler(WearerEvent.fromDto(event));
+  }
 
   @override
   void onDataChanged(WearerEventDto event) => _link._dispatch(event);

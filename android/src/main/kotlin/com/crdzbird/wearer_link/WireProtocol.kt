@@ -25,6 +25,9 @@ object WireProtocol {
   /** File transfers: ChannelClient path = "/wl/f<userPath>/<uuid>". */
   const val FILE_PREFIX = "$PREFIX/f"
 
+  /** Request/response RPC: MessageClient path = "/wl/r<userPath>". */
+  const val REQUEST_PREFIX = "$PREFIX/r"
+
   const val KEY_PAYLOAD = "payload"
   const val KEY_ID = "id"
   const val KEY_TIMESTAMP = "ts"
@@ -45,6 +48,10 @@ object WireProtocol {
   /** "/wl/q/foo/bar/<uuid>" -> "/foo/bar". */
   fun userPathOfQueue(wirePath: String) =
     wirePath.removePrefix(QUEUE_PREFIX).substringBeforeLast('/')
+
+  fun requestPath(userPath: String) = REQUEST_PREFIX + userPath
+
+  fun userPathOfRequest(wirePath: String) = wirePath.removePrefix(REQUEST_PREFIX)
 
   fun filePath(userPath: String, id: String) = "$FILE_PREFIX$userPath/$id"
 

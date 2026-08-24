@@ -138,6 +138,10 @@ enum WearerErrorCode {
   /// Launching the companion app failed.
   launchFailed,
 
+  /// A request reached the counterpart but no request handler was
+  /// registered there.
+  noHandler,
+
   /// Anything the native side didn't classify.
   unknown,
 }

@@ -22,6 +22,7 @@ public class WearerLinkPlugin: NSObject, FlutterPlugin {
   public func detachFromEngine(for registrar: FlutterPluginRegistrar) {
     bridge.liveDispatcher = nil
     bridge.statusListener = nil
+    bridge.requestHandler = nil
     WearerLinkHostApiSetup.setUp(binaryMessenger: registrar.messenger(), api: nil)
     flutterApi = nil
   }
@@ -64,6 +65,16 @@ public class WearerLinkPlugin: NSObject, FlutterPlugin {
     bridge.statusListener = { [weak self] status in
       self?.flutterApi?.onConnectionStateChanged(status: status) { _ in }
     }
+    bridge.requestHandler = { [weak self] event, completion in
+      guard let api = self?.flutterApi else {
+        completion(.failure(PigeonError(
+          code: "noHandler", message: "Engine detached.", details: nil)))
+        return
+      }
+      api.onRequest(event: event) { result in
+        completion(result.map { $0.data }.mapError { $0 as Error })
+      }
+    }
   }
 }
 
@@ -82,10 +93,44 @@ extension WearerLinkPlugin: WearerLinkHostApi {
   func sendMessage(
     path: String,
     payload: FlutterStandardTypedData,
+    nodeId: String?,
     completion: @escaping (Result<Void, Error>) -> Void
   ) {
+    // nodeId is Android-only fan-out control; iOS has a single counterpart.
     bridge.sendMessage(path: path, payload: payload.data) { error in
       if let error { completion(.failure(error)) } else { completion(.success(())) }
+    }
+  }
+
+  func sendRequest(
+    path: String,
+    payload: FlutterStandardTypedData,
+    nodeId: String?,
+    completion: @escaping (Result<FlutterStandardTypedData, Error>) -> Void
+  ) {
+    bridge.sendRequest(path: path, payload: payload.data) { result in
+      completion(result.map { FlutterStandardTypedData(bytes: $0) })
+    }
+  }
+
+  func readSyncData(
+    path: String,
+    completion: @escaping (Result<FlutterStandardTypedData?, Error>) -> Void
+  ) {
+    completion(.success(bridge.readSyncData(path: path).map {
+      FlutterStandardTypedData(bytes: $0)
+    }))
+  }
+
+  func deleteSyncData(
+    path: String,
+    completion: @escaping (Result<Void, Error>) -> Void
+  ) {
+    do {
+      try bridge.deleteSyncData(path: path)
+      completion(.success(()))
+    } catch {
+      completion(.failure(PigeonError(code: "unknown", message: "\(error)", details: nil)))
     }
   }
 
@@ -115,6 +160,7 @@ extension WearerLinkPlugin: WearerLinkHostApi {
   func transferFile(
     path: String,
     filePath: String,
+    nodeId: String?,
     completion: @escaping (Result<Void, Error>) -> Void
   ) {
     do {

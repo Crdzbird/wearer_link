@@ -31,6 +31,17 @@ await wearer.sendMessage('/ping', bytes);   // interactive, needs reachable coun
 await wearer.syncData('/state', bytes);     // latest-per-path, survives disconnects
 await wearer.transferData('/log', bytes);   // queued FIFO, every item delivered
 
+// Request/response RPC (10s default timeout; counterpart must answer)
+final reply = await wearer.sendRequest('/echo', bytes);
+wearer.setRequestHandler((req) async => answerFor(req)); // answer their requests
+
+// Read/delete synced state without waiting for an event
+final latest = await wearer.readSyncData('/state'); // counterpart's latest, or null
+await wearer.deleteSyncData('/state');              // removes what THIS device synced
+
+// Multi-watch (Android): target one node; iOS ignores nodeId (single watch)
+await wearer.sendMessage('/ping', bytes, nodeId: status.nodes.first);
+
 // Files (received into the app cache dir; move if you need durability)
 await wearer.transferFile('/photos/1', localFile.path);
 wearer.fileEvents.listen((e) => print('got file: ${e.filePath}'));
@@ -52,8 +63,14 @@ await wearer.requestSurfaceUpdate('com.my.Tile'); // Wear OS: tile/complication 
 await wearer.launchCompanion();
 ```
 
-Delivery to Dart is **at-least-once**: deduplicate with `event.id` if your
-payloads are not idempotent.
+Delivery to Dart is **at-least-once**; the facade already drops same-`id`
+duplicates within a session, so cross-launch redelivery (e.g. a background
+handler that died mid-work) is the only case left to deduplicate with
+`event.id`.
+
+On the native watch the same RPC surface is
+`WearerLinkWatch.shared.sendRequest(path:payload:completion:)` /
+`onRequest`, plus `readSyncData(path:)` / `deleteSyncData(path:)`.
 
 ## What each platform allows
 

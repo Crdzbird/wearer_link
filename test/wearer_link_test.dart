@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/services.dart';
@@ -9,6 +10,7 @@ class _FakeHost extends WearerLinkHostApi {
   final sent = <(String, Uint8List)>[];
   final synced = <(String, Uint8List)>[];
   final files = <(String, String)>[];
+  final syncStore = <String, Uint8List>{};
   List<WearerEventDto> pending = [];
   int drainCalls = 0;
   (int, int)? backgroundHandles;
@@ -24,10 +26,32 @@ class _FakeHost extends WearerLinkHostApi {
       );
 
   @override
-  Future<void> sendMessage(String path, Uint8List payload) async {
+  Future<void> sendMessage(
+    String path,
+    Uint8List payload,
+    String? nodeId,
+  ) async {
     if (throwOnSend case final e?) throw e;
     sent.add((path, payload));
   }
+
+  @override
+  Future<Uint8List> sendRequest(
+    String path,
+    Uint8List payload,
+    String? nodeId,
+  ) async {
+    if (throwOnSend case final e?) throw e;
+    sent.add((path, payload));
+    return Uint8List.fromList([9, 9]);
+  }
+
+  @override
+  Future<Uint8List?> readSyncData(String path) async =>
+      syncStore[path];
+
+  @override
+  Future<void> deleteSyncData(String path) async => syncStore.remove(path);
 
   @override
   Future<void> syncData(String path, Uint8List payload) async =>
@@ -49,7 +73,11 @@ class _FakeHost extends WearerLinkHostApi {
   }
 
   @override
-  Future<void> transferFile(String path, String filePath) async =>
+  Future<void> transferFile(
+    String path,
+    String filePath,
+    String? nodeId,
+  ) async =>
       files.add((path, filePath));
 
   @override
@@ -88,6 +116,16 @@ WearerEventDto _event(
     );
 
 Future<void> topLevelBackgroundHandler(WearerEvent event) async {}
+
+class _SlowHost extends _FakeHost {
+  @override
+  Future<Uint8List> sendRequest(
+    String path,
+    Uint8List payload,
+    String? nodeId,
+  ) =>
+      Completer<Uint8List>().future; // never completes
+}
 
 void main() {
   test('companion status maps DTO to model', () async {
@@ -173,6 +211,51 @@ void main() {
       () => link.registerBackgroundHandler((event) async {}),
       throwsArgumentError,
     );
+  });
+
+  test('sendRequest returns the reply payload', () async {
+    final host = _FakeHost();
+    final reply =
+        await WearerLink.forTest(host).sendRequest('/rpc', Uint8List(0));
+    expect(reply, [9, 9]);
+    expect(host.sent.single.$1, '/rpc');
+  });
+
+  test('sendRequest timeout maps to sendFailed', () async {
+    final host = _SlowHost();
+    await expectLater(
+      WearerLink.forTest(host).sendRequest(
+        '/rpc',
+        Uint8List(0),
+        timeout: const Duration(milliseconds: 50),
+      ),
+      throwsA(
+        isA<WearerLinkException>()
+            .having((e) => e.code, 'code', WearerErrorCode.sendFailed),
+      ),
+    );
+  });
+
+  test('readSyncData round-trips through the host', () async {
+    final host = _FakeHost()
+      ..syncStore['/state'] = Uint8List.fromList([7]);
+    final link = WearerLink.forTest(host);
+    expect(await link.readSyncData('/state'), [7]);
+    await link.deleteSyncData('/state');
+    expect(await link.readSyncData('/state'), isNull);
+  });
+
+  test('duplicate event ids are dropped (session dedup)', () async {
+    final host = _FakeHost()
+      ..pending = [
+        _event('dup', WearerEventKindDto.message),
+        _event('dup', WearerEventKindDto.message),
+      ];
+    final link = WearerLink.forTest(host);
+    final messages = <WearerEvent>[];
+    link.messages.listen(messages.add);
+    await pumpEventQueue();
+    expect(messages, hasLength(1));
   });
 
   test('updateComplication maps unsupported to typed exception', () async {

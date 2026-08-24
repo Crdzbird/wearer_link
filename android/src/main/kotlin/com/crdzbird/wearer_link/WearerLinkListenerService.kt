@@ -3,6 +3,8 @@ package com.crdzbird.wearer_link
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
+import com.google.android.gms.tasks.Task
+import com.google.android.gms.tasks.TaskCompletionSource
 import com.google.android.gms.tasks.Tasks
 import com.google.android.gms.wearable.ChannelClient
 import com.google.android.gms.wearable.DataEvent
@@ -78,6 +80,43 @@ class WearerLinkListenerService : WearableListenerService() {
         Wearable.getDataClient(this).deleteDataItems(item.uri)
       }
     }
+  }
+
+  /**
+   * Request/response RPC. Requests need a live Dart handler right now —
+   * unlike fire-and-forget events they cannot be queued (the sender is
+   * waiting) — so with no engine attached the request is rejected.
+   */
+  override fun onRequest(nodeId: String, path: String, request: ByteArray): Task<ByteArray>? {
+    if (!path.startsWith(WireProtocol.REQUEST_PREFIX)) return null
+    val handler = WearerLinkPlugin.liveRequestHandler
+      ?: return Tasks.forException(
+        IllegalStateException("wearer_link: app has no live request handler"),
+      )
+    val source = TaskCompletionSource<ByteArray>()
+    val dto = WearerEventDto(
+      id = UUID.randomUUID().toString(),
+      kind = WearerEventKindDto.MESSAGE,
+      path = WireProtocol.userPathOfRequest(path),
+      payload = request,
+      sourceNodeId = nodeId,
+      timestampMillis = System.currentTimeMillis(),
+      deliveredWhileDead = false,
+    )
+    mainHandler.post {
+      val live = WearerLinkPlugin.liveRequestHandler
+      if (live == null) {
+        source.setException(IllegalStateException("wearer_link: engine detached"))
+      } else {
+        live(dto) { result ->
+          result.fold(
+            onSuccess = { source.setResult(it) },
+            onFailure = { source.setException(Exception(it)) },
+          )
+        }
+      }
+    }
+    return source.task
   }
 
   // -- File transfers (ChannelClient) ---------------------------------------

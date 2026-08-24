@@ -383,11 +383,24 @@ protocol WearerLinkHostApi {
   func isSupported() throws -> Bool
   func getCompanionStatus(completion: @escaping (Result<CompanionStatusDto, Error>) -> Void)
   /// Interactive message. Requires a reachable counterpart.
-  /// On Android sends to every reachable node advertising the capability.
-  func sendMessage(path: String, payload: FlutterStandardTypedData, completion: @escaping (Result<Void, Error>) -> Void)
+  /// On Android sends to every reachable capable node, or only [nodeId]
+  /// when given; iOS has a single counterpart and ignores [nodeId].
+  func sendMessage(path: String, payload: FlutterStandardTypedData, nodeId: String?, completion: @escaping (Result<Void, Error>) -> Void)
+  /// Request/response round trip: resolves with the counterpart's reply
+  /// payload. Android: MessageClient.sendRequest RPC; iOS: sendMessage
+  /// reply payload. The counterpart must have a request handler
+  /// (setRequestHandler in Dart, onRequest in WearerLinkWatch); without one
+  /// the call fails with 'noHandler'.
+  func sendRequest(path: String, payload: FlutterStandardTypedData, nodeId: String?, completion: @escaping (Result<FlutterStandardTypedData, Error>) -> Void)
   /// Persistent state sync: DataClient item (Android) /
   /// updateApplicationContext (iOS). Latest value per path wins.
   func syncData(path: String, payload: FlutterStandardTypedData, completion: @escaping (Result<Void, Error>) -> Void)
+  /// Latest value the COUNTERPART synced for [path] (mirror of what
+  /// dataEvents delivered), or null if it never synced one.
+  func readSyncData(path: String, completion: @escaping (Result<FlutterStandardTypedData?, Error>) -> Void)
+  /// Remove the value THIS device synced for [path] (the counterpart's own
+  /// value is theirs to delete).
+  func deleteSyncData(path: String, completion: @escaping (Result<Void, Error>) -> Void)
   /// Queued background transfer that survives unreachability:
   /// DataClient with urgent flag (Android) / transferUserInfo (iOS).
   func transferData(path: String, payload: FlutterStandardTypedData, completion: @escaping (Result<Void, Error>) -> Void)
@@ -399,10 +412,10 @@ protocol WearerLinkHostApi {
   /// Drain events persisted while the app was dead. Called by the Dart
   /// facade on startup; each drained event is also removed from the store.
   func drainPendingEvents(completion: @escaping (Result<[WearerEventDto], Error>) -> Void)
-  /// Transfer the file at [filePath] to the counterpart.
-  /// Android: ChannelClient (needs a reachable capable node).
+  /// Transfer the file at [filePath] to the counterpart (or only [nodeId]
+  /// on Android). Android: ChannelClient (needs a reachable capable node).
   /// iOS: WCSession.transferFile (queued, survives unreachability).
-  func transferFile(path: String, filePath: String, completion: @escaping (Result<Void, Error>) -> Void)
+  func transferFile(path: String, filePath: String, nodeId: String?, completion: @escaping (Result<Void, Error>) -> Void)
   /// Push fresh complication data to the watch face.
   /// iOS: transferCurrentComplicationUserInfo (budgeted by watchOS — ~50/day;
   /// over budget it silently degrades to a regular transfer).
@@ -460,14 +473,16 @@ class WearerLinkHostApiSetup {
       getCompanionStatusChannel.setMessageHandler(nil)
     }
     /// Interactive message. Requires a reachable counterpart.
-    /// On Android sends to every reachable node advertising the capability.
+    /// On Android sends to every reachable capable node, or only [nodeId]
+    /// when given; iOS has a single counterpart and ignores [nodeId].
     let sendMessageChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.wearer_link.WearerLinkHostApi.sendMessage\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
     if let api = api {
       sendMessageChannel.setMessageHandler { message, reply in
         let args = message as! [Any?]
         let pathArg = args[0] as! String
         let payloadArg = args[1] as! FlutterStandardTypedData
-        api.sendMessage(path: pathArg, payload: payloadArg) { result in
+        let nodeIdArg: String? = nilOrValue(args[2])
+        api.sendMessage(path: pathArg, payload: payloadArg, nodeId: nodeIdArg) { result in
           switch result {
           case .success:
             reply(wrapResult(nil))
@@ -478,6 +493,30 @@ class WearerLinkHostApiSetup {
       }
     } else {
       sendMessageChannel.setMessageHandler(nil)
+    }
+    /// Request/response round trip: resolves with the counterpart's reply
+    /// payload. Android: MessageClient.sendRequest RPC; iOS: sendMessage
+    /// reply payload. The counterpart must have a request handler
+    /// (setRequestHandler in Dart, onRequest in WearerLinkWatch); without one
+    /// the call fails with 'noHandler'.
+    let sendRequestChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.wearer_link.WearerLinkHostApi.sendRequest\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+    if let api = api {
+      sendRequestChannel.setMessageHandler { message, reply in
+        let args = message as! [Any?]
+        let pathArg = args[0] as! String
+        let payloadArg = args[1] as! FlutterStandardTypedData
+        let nodeIdArg: String? = nilOrValue(args[2])
+        api.sendRequest(path: pathArg, payload: payloadArg, nodeId: nodeIdArg) { result in
+          switch result {
+          case .success(let res):
+            reply(wrapResult(res))
+          case .failure(let error):
+            reply(wrapError(error))
+          }
+        }
+      }
+    } else {
+      sendRequestChannel.setMessageHandler(nil)
     }
     /// Persistent state sync: DataClient item (Android) /
     /// updateApplicationContext (iOS). Latest value per path wins.
@@ -498,6 +537,44 @@ class WearerLinkHostApiSetup {
       }
     } else {
       syncDataChannel.setMessageHandler(nil)
+    }
+    /// Latest value the COUNTERPART synced for [path] (mirror of what
+    /// dataEvents delivered), or null if it never synced one.
+    let readSyncDataChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.wearer_link.WearerLinkHostApi.readSyncData\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+    if let api = api {
+      readSyncDataChannel.setMessageHandler { message, reply in
+        let args = message as! [Any?]
+        let pathArg = args[0] as! String
+        api.readSyncData(path: pathArg) { result in
+          switch result {
+          case .success(let res):
+            reply(wrapResult(res))
+          case .failure(let error):
+            reply(wrapError(error))
+          }
+        }
+      }
+    } else {
+      readSyncDataChannel.setMessageHandler(nil)
+    }
+    /// Remove the value THIS device synced for [path] (the counterpart's own
+    /// value is theirs to delete).
+    let deleteSyncDataChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.wearer_link.WearerLinkHostApi.deleteSyncData\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+    if let api = api {
+      deleteSyncDataChannel.setMessageHandler { message, reply in
+        let args = message as! [Any?]
+        let pathArg = args[0] as! String
+        api.deleteSyncData(path: pathArg) { result in
+          switch result {
+          case .success:
+            reply(wrapResult(nil))
+          case .failure(let error):
+            reply(wrapError(error))
+          }
+        }
+      }
+    } else {
+      deleteSyncDataChannel.setMessageHandler(nil)
     }
     /// Queued background transfer that survives unreachability:
     /// DataClient with urgent flag (Android) / transferUserInfo (iOS).
@@ -555,8 +632,8 @@ class WearerLinkHostApiSetup {
     } else {
       drainPendingEventsChannel.setMessageHandler(nil)
     }
-    /// Transfer the file at [filePath] to the counterpart.
-    /// Android: ChannelClient (needs a reachable capable node).
+    /// Transfer the file at [filePath] to the counterpart (or only [nodeId]
+    /// on Android). Android: ChannelClient (needs a reachable capable node).
     /// iOS: WCSession.transferFile (queued, survives unreachability).
     let transferFileChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.wearer_link.WearerLinkHostApi.transferFile\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
     if let api = api {
@@ -564,7 +641,8 @@ class WearerLinkHostApiSetup {
         let args = message as! [Any?]
         let pathArg = args[0] as! String
         let filePathArg = args[1] as! String
-        api.transferFile(path: pathArg, filePath: filePathArg) { result in
+        let nodeIdArg: String? = nilOrValue(args[2])
+        api.transferFile(path: pathArg, filePath: filePathArg, nodeId: nodeIdArg) { result in
           switch result {
           case .success:
             reply(wrapResult(nil))
@@ -661,6 +739,9 @@ class WearerLinkHostApiSetup {
 /// Generated protocol from Pigeon that represents Flutter messages that can be called from Swift.
 protocol WearerLinkFlutterApiProtocol {
   func onMessage(event eventArg: WearerEventDto, completion: @escaping (Result<Void, PigeonError>) -> Void)
+  /// Request from the counterpart; the returned bytes are its reply.
+  /// Completing with an error rejects the request on the sender's side.
+  func onRequest(event eventArg: WearerEventDto, completion: @escaping (Result<FlutterStandardTypedData, PigeonError>) -> Void)
   func onDataChanged(event eventArg: WearerEventDto, completion: @escaping (Result<Void, PigeonError>) -> Void)
   func onFileReceived(event eventArg: WearerEventDto, completion: @escaping (Result<Void, PigeonError>) -> Void)
   func onConnectionStateChanged(status statusArg: CompanionStatusDto, completion: @escaping (Result<Void, PigeonError>) -> Void)
@@ -690,6 +771,29 @@ class WearerLinkFlutterApi: WearerLinkFlutterApiProtocol {
         completion(.failure(PigeonError(code: code, message: message, details: details)))
       } else {
         completion(.success(()))
+      }
+    }
+  }
+  /// Request from the counterpart; the returned bytes are its reply.
+  /// Completing with an error rejects the request on the sender's side.
+  func onRequest(event eventArg: WearerEventDto, completion: @escaping (Result<FlutterStandardTypedData, PigeonError>) -> Void) {
+    let channelName: String = "dev.flutter.pigeon.wearer_link.WearerLinkFlutterApi.onRequest\(messageChannelSuffix)"
+    let channel = FlutterBasicMessageChannel(name: channelName, binaryMessenger: binaryMessenger, codec: codec)
+    channel.sendMessage([eventArg] as [Any?]) { response in
+      guard let listResponse = response as? [Any?] else {
+        completion(.failure(createConnectionError(withChannelName: channelName)))
+        return
+      }
+      if listResponse.count > 1 {
+        let code: String = listResponse[0] as! String
+        let message: String? = nilOrValue(listResponse[1])
+        let details: String? = nilOrValue(listResponse[2])
+        completion(.failure(PigeonError(code: code, message: message, details: details)))
+      } else if listResponse[0] == nil {
+        completion(.failure(PigeonError(code: "null-error", message: "Flutter api returned null value for non-null return value.", details: "")))
+      } else {
+        let result = listResponse[0] as! FlutterStandardTypedData
+        completion(.success(result))
       }
     }
   }

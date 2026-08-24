@@ -18,6 +18,22 @@ Working prototype.
 * watchOS: `WearerLinkWatch` Swift package for native watch apps
   (activate/send/sync/transfer/wake, startup event buffering).
 
+## 0.3.0
+
+* `sendRequest` / `setRequestHandler`: request-response RPC with reply
+  payloads (Android `MessageClient.sendRequest`; iOS `sendMessage` reply
+  dictionaries; watchOS `sendRequest`/`onRequest`). Dart-side timeout
+  (default 10s) maps to `sendFailed`; a counterpart without a handler
+  rejects with `noHandler` instead of queueing — the sender is waiting.
+* `readSyncData` / `deleteSyncData`: query the counterpart's latest synced
+  value (device-verified: read a value synced in a previous session);
+  delete this device's own synced value.
+* Optional `nodeId` on `sendMessage` / `sendRequest` / `transferFile` for
+  multi-watch targeting on Android (iOS has a single counterpart).
+* Session-level dedup: the facade drops duplicate event ids (bounded LRU),
+  so at-least-once redelivery within a session no longer double-fires
+  streams.
+
 ## 0.2.0
 
 M5: background isolate, file transfers, watch-face surfaces.

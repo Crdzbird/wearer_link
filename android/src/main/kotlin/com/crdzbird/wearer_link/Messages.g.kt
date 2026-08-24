@@ -410,14 +410,33 @@ interface WearerLinkHostApi {
   fun getCompanionStatus(callback: (Result<CompanionStatusDto>) -> Unit)
   /**
    * Interactive message. Requires a reachable counterpart.
-   * On Android sends to every reachable node advertising the capability.
+   * On Android sends to every reachable capable node, or only [nodeId]
+   * when given; iOS has a single counterpart and ignores [nodeId].
    */
-  fun sendMessage(path: String, payload: ByteArray, callback: (Result<Unit>) -> Unit)
+  fun sendMessage(path: String, payload: ByteArray, nodeId: String?, callback: (Result<Unit>) -> Unit)
+  /**
+   * Request/response round trip: resolves with the counterpart's reply
+   * payload. Android: MessageClient.sendRequest RPC; iOS: sendMessage
+   * reply payload. The counterpart must have a request handler
+   * (setRequestHandler in Dart, onRequest in WearerLinkWatch); without one
+   * the call fails with 'noHandler'.
+   */
+  fun sendRequest(path: String, payload: ByteArray, nodeId: String?, callback: (Result<ByteArray>) -> Unit)
   /**
    * Persistent state sync: DataClient item (Android) /
    * updateApplicationContext (iOS). Latest value per path wins.
    */
   fun syncData(path: String, payload: ByteArray, callback: (Result<Unit>) -> Unit)
+  /**
+   * Latest value the COUNTERPART synced for [path] (mirror of what
+   * dataEvents delivered), or null if it never synced one.
+   */
+  fun readSyncData(path: String, callback: (Result<ByteArray?>) -> Unit)
+  /**
+   * Remove the value THIS device synced for [path] (the counterpart's own
+   * value is theirs to delete).
+   */
+  fun deleteSyncData(path: String, callback: (Result<Unit>) -> Unit)
   /**
    * Queued background transfer that survives unreachability:
    * DataClient with urgent flag (Android) / transferUserInfo (iOS).
@@ -436,11 +455,11 @@ interface WearerLinkHostApi {
    */
   fun drainPendingEvents(callback: (Result<List<WearerEventDto>>) -> Unit)
   /**
-   * Transfer the file at [filePath] to the counterpart.
-   * Android: ChannelClient (needs a reachable capable node).
+   * Transfer the file at [filePath] to the counterpart (or only [nodeId]
+   * on Android). Android: ChannelClient (needs a reachable capable node).
    * iOS: WCSession.transferFile (queued, survives unreachability).
    */
-  fun transferFile(path: String, filePath: String, callback: (Result<Unit>) -> Unit)
+  fun transferFile(path: String, filePath: String, nodeId: String?, callback: (Result<Unit>) -> Unit)
   /**
    * Push fresh complication data to the watch face.
    * iOS: transferCurrentComplicationUserInfo (budgeted by watchOS — ~50/day;
@@ -518,12 +537,35 @@ interface WearerLinkHostApi {
             val args = message as List<Any?>
             val pathArg = args[0] as String
             val payloadArg = args[1] as ByteArray
-            api.sendMessage(pathArg, payloadArg) { result: Result<Unit> ->
+            val nodeIdArg = args[2] as String?
+            api.sendMessage(pathArg, payloadArg, nodeIdArg) { result: Result<Unit> ->
               val error = result.exceptionOrNull()
               if (error != null) {
                 reply.reply(MessagesPigeonUtils.wrapError(error))
               } else {
                 reply.reply(MessagesPigeonUtils.wrapResult(null))
+              }
+            }
+          }
+        } else {
+          channel.setMessageHandler(null)
+        }
+      }
+      run {
+        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.wearer_link.WearerLinkHostApi.sendRequest$separatedMessageChannelSuffix", codec)
+        if (api != null) {
+          channel.setMessageHandler { message, reply ->
+            val args = message as List<Any?>
+            val pathArg = args[0] as String
+            val payloadArg = args[1] as ByteArray
+            val nodeIdArg = args[2] as String?
+            api.sendRequest(pathArg, payloadArg, nodeIdArg) { result: Result<ByteArray> ->
+              val error = result.exceptionOrNull()
+              if (error != null) {
+                reply.reply(MessagesPigeonUtils.wrapError(error))
+              } else {
+                val data = result.getOrNull()
+                reply.reply(MessagesPigeonUtils.wrapResult(data))
               }
             }
           }
@@ -539,6 +581,45 @@ interface WearerLinkHostApi {
             val pathArg = args[0] as String
             val payloadArg = args[1] as ByteArray
             api.syncData(pathArg, payloadArg) { result: Result<Unit> ->
+              val error = result.exceptionOrNull()
+              if (error != null) {
+                reply.reply(MessagesPigeonUtils.wrapError(error))
+              } else {
+                reply.reply(MessagesPigeonUtils.wrapResult(null))
+              }
+            }
+          }
+        } else {
+          channel.setMessageHandler(null)
+        }
+      }
+      run {
+        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.wearer_link.WearerLinkHostApi.readSyncData$separatedMessageChannelSuffix", codec)
+        if (api != null) {
+          channel.setMessageHandler { message, reply ->
+            val args = message as List<Any?>
+            val pathArg = args[0] as String
+            api.readSyncData(pathArg) { result: Result<ByteArray?> ->
+              val error = result.exceptionOrNull()
+              if (error != null) {
+                reply.reply(MessagesPigeonUtils.wrapError(error))
+              } else {
+                val data = result.getOrNull()
+                reply.reply(MessagesPigeonUtils.wrapResult(data))
+              }
+            }
+          }
+        } else {
+          channel.setMessageHandler(null)
+        }
+      }
+      run {
+        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.wearer_link.WearerLinkHostApi.deleteSyncData$separatedMessageChannelSuffix", codec)
+        if (api != null) {
+          channel.setMessageHandler { message, reply ->
+            val args = message as List<Any?>
+            val pathArg = args[0] as String
+            api.deleteSyncData(pathArg) { result: Result<Unit> ->
               val error = result.exceptionOrNull()
               if (error != null) {
                 reply.reply(MessagesPigeonUtils.wrapError(error))
@@ -613,7 +694,8 @@ interface WearerLinkHostApi {
             val args = message as List<Any?>
             val pathArg = args[0] as String
             val filePathArg = args[1] as String
-            api.transferFile(pathArg, filePathArg) { result: Result<Unit> ->
+            val nodeIdArg = args[2] as String?
+            api.transferFile(pathArg, filePathArg, nodeIdArg) { result: Result<Unit> ->
               val error = result.exceptionOrNull()
               if (error != null) {
                 reply.reply(MessagesPigeonUtils.wrapError(error))
@@ -725,6 +807,30 @@ class WearerLinkFlutterApi(private val binaryMessenger: BinaryMessenger, private
           callback(Result.failure(FlutterError(it[0] as String, it[1] as String, it[2] as String?)))
         } else {
           callback(Result.success(Unit))
+        }
+      } else {
+        callback(Result.failure(MessagesPigeonUtils.createConnectionError(channelName)))
+      } 
+    }
+  }
+  /**
+   * Request from the counterpart; the returned bytes are its reply.
+   * Completing with an error rejects the request on the sender's side.
+   */
+  fun onRequest(eventArg: WearerEventDto, callback: (Result<ByteArray>) -> Unit)
+{
+    val separatedMessageChannelSuffix = if (messageChannelSuffix.isNotEmpty()) ".$messageChannelSuffix" else ""
+    val channelName = "dev.flutter.pigeon.wearer_link.WearerLinkFlutterApi.onRequest$separatedMessageChannelSuffix"
+    val channel = BasicMessageChannel<Any?>(binaryMessenger, channelName, codec)
+    channel.send(listOf(eventArg)) {
+      if (it is List<*>) {
+        if (it.size > 1) {
+          callback(Result.failure(FlutterError(it[0] as String, it[1] as String, it[2] as String?)))
+        } else if (it[0] == null) {
+          callback(Result.failure(FlutterError("null-error", "Flutter api returned null value for non-null return value.", "")))
+        } else {
+          val output = it[0] as ByteArray
+          callback(Result.success(output))
         }
       } else {
         callback(Result.failure(MessagesPigeonUtils.createConnectionError(channelName)))

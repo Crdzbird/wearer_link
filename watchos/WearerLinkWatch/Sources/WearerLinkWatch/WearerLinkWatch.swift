@@ -43,6 +43,12 @@ public final class WearerLinkWatch: NSObject {
   /// Called on the main queue for every message/data event from the phone.
   public var onEvent: ((Event) -> Void)?
 
+  /// Answers `sendRequest` round trips from the phone. Called on the main
+  /// queue; invoke `reply` exactly once with the response payload. While
+  /// unset, phone requests fail with a noHandler error (never queued — the
+  /// sender is waiting).
+  public var onRequest: ((Event, @escaping (Data) -> Void) -> Void)?
+
   /// Called on the main queue when reachability to the phone changes.
   public var onReachabilityChange: ((Bool) -> Void)?
 
@@ -99,6 +105,57 @@ public final class WearerLinkWatch: NSObject {
       errorHandler: { error in
         DispatchQueue.main.async { completion?(.sendFailed(error)) }
       })
+  }
+
+  /// Request/response round trip: completes with the payload the phone's
+  /// request handler returned.
+  public func sendRequest(
+    path: String,
+    payload: Data,
+    completion: @escaping (Result<Data, WearerError>) -> Void
+  ) {
+    let session = WCSession.default
+    guard session.activationState == .activated else {
+      completion(.failure(.notActivated))
+      return
+    }
+    guard session.isReachable else {
+      completion(.failure(.phoneUnreachable))
+      return
+    }
+    session.sendMessage(
+      envelope(path: path, payload: payload, kind: Envelope.kindRequest),
+      replyHandler: { reply in
+        DispatchQueue.main.async {
+          if let data = reply[Envelope.replyPayload] as? Data {
+            completion(.success(data))
+          } else {
+            let reason = reply[Envelope.replyError] as? String ?? "malformed reply"
+            completion(.failure(.sendFailed(NSError(
+              domain: "wearer_link", code: 1,
+              userInfo: [NSLocalizedDescriptionKey: reason]))))
+          }
+        }
+      },
+      errorHandler: { error in
+        DispatchQueue.main.async { completion(.failure(.sendFailed(error))) }
+      })
+  }
+
+  /// Latest value the phone synced for [path], or nil.
+  public func readSyncData(path: String) -> Data? {
+    guard let dictionary = WCSession.default.receivedApplicationContext[path]
+      as? [String: Any] else { return nil }
+    return dictionary[Envelope.payload] as? Data
+  }
+
+  /// Remove the value this watch synced for [path].
+  public func deleteSyncData(path: String) throws {
+    let session = WCSession.default
+    var context = session.applicationContext
+    if context.removeValue(forKey: path) != nil {
+      try session.updateApplicationContext(context)
+    }
   }
 
   /// Latest-state sync; newest value per path wins. Delivered even when
@@ -186,6 +243,10 @@ public final class WearerLinkWatch: NSObject {
     static let kindMessage = 0
     static let kindData = 1
     static let kindFile = 2
+    static let kindRequest = 3
+
+    static let replyPayload = "d"
+    static let replyError = "err"
   }
 }
 
@@ -218,6 +279,35 @@ extension WearerLinkWatch: WCSessionDelegate {
     didReceiveMessage message: [String: Any],
     replyHandler: @escaping ([String: Any]) -> Void
   ) {
+    if (message[Envelope.kind] as? Int) == Envelope.kindRequest {
+      guard
+        let path = message[Envelope.path] as? String,
+        let payload = message[Envelope.payload] as? Data
+      else {
+        replyHandler([Envelope.replyError: "malformed"])
+        return
+      }
+      let millis = message[Envelope.timestamp] as? Int64
+        ?? Int64(Date().timeIntervalSince1970 * 1000)
+      let event = Event(
+        id: message[Envelope.id] as? String ?? UUID().uuidString,
+        path: path,
+        payload: payload,
+        isDataEvent: false,
+        timestamp: Date(timeIntervalSince1970: TimeInterval(millis) / 1000),
+        fileURL: nil
+      )
+      DispatchQueue.main.async {
+        guard let handler = self.onRequest else {
+          replyHandler([Envelope.replyError: "noHandler"])
+          return
+        }
+        handler(event) { data in
+          replyHandler([Envelope.replyPayload: data])
+        }
+      }
+      return
+    }
     handleInbound(message)
     replyHandler([:])
   }

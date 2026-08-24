@@ -1,3 +1,4 @@
+import Flutter
 import Foundation
 import WatchConnectivity
 
@@ -13,6 +14,11 @@ enum Envelope {
   static let kindMessage = 0
   static let kindData = 1
   static let kindFile = 2
+  static let kindRequest = 3
+
+  /// Reply-dictionary keys for request round trips.
+  static let replyPayload = "d"
+  static let replyError = "err"
 }
 
 /// Singleton owner of the WCSession, deliberately independent of any plugin
@@ -30,6 +36,10 @@ final class WatchSessionBridge: NSObject {
 
   /// Pushed on reachability/pairing changes while a plugin is bound.
   var statusListener: ((CompanionStatusDto) -> Void)?
+
+  /// Answers request round trips while a plugin is bound. Main thread;
+  /// the completion may fire on any thread.
+  var requestHandler: ((WearerEventDto, @escaping (Result<Data, Error>) -> Void) -> Void)?
 
   private override init() {
     super.init()
@@ -86,6 +96,56 @@ final class WatchSessionBridge: NSObject {
           completion(PigeonError(code: "sendFailed", message: "\(error)", details: nil))
         }
       })
+  }
+
+  /// Request/response round trip: the reply dictionary carries the
+  /// counterpart handler's payload (or its rejection).
+  func sendRequest(path: String, payload: Data, completion: @escaping (Result<Data, Error>) -> Void) {
+    let session = WCSession.default
+    guard session.activationState == .activated, session.isReachable else {
+      completion(.failure(PigeonError(
+        code: "unreachable",
+        message: "Watch is not reachable for interactive requests.",
+        details: nil)))
+      return
+    }
+    session.sendMessage(
+      envelope(path: path, payload: payload, kind: Envelope.kindRequest),
+      replyHandler: { reply in
+        DispatchQueue.main.async {
+          if let err = reply[Envelope.replyError] as? String {
+            let code = err == "noHandler" ? "noHandler" : "sendFailed"
+            completion(.failure(PigeonError(
+              code: code, message: "Counterpart rejected request: \(err)", details: nil)))
+          } else if let data = reply[Envelope.replyPayload] as? Data {
+            completion(.success(data))
+          } else {
+            completion(.failure(PigeonError(
+              code: "sendFailed", message: "Malformed reply.", details: nil)))
+          }
+        }
+      },
+      errorHandler: { error in
+        DispatchQueue.main.async {
+          completion(.failure(PigeonError(code: "sendFailed", message: "\(error)", details: nil)))
+        }
+      })
+  }
+
+  /// Latest value the counterpart synced for [path].
+  func readSyncData(path: String) -> Data? {
+    let received = WCSession.default.receivedApplicationContext
+    guard let dictionary = received[path] as? [String: Any] else { return nil }
+    return dictionary[Envelope.payload] as? Data
+  }
+
+  /// Remove the value this device synced for [path].
+  func deleteSyncData(path: String) throws {
+    let session = WCSession.default
+    var context = session.applicationContext
+    if context.removeValue(forKey: path) != nil {
+      try session.updateApplicationContext(context)
+    }
   }
 
   func syncData(path: String, payload: Data) throws {
@@ -206,8 +266,50 @@ extension WatchSessionBridge: WCSessionDelegate {
     didReceiveMessage message: [String: Any],
     replyHandler: @escaping ([String: Any]) -> Void
   ) {
+    if (message[Envelope.kind] as? Int) == Envelope.kindRequest {
+      handleRequest(message, replyHandler: replyHandler)
+      return
+    }
     handleInbound(message)
     replyHandler([:])
+  }
+
+  /// Requests need a live Dart handler right now — the sender is waiting —
+  /// so with no engine/handler bound they are rejected, never queued.
+  private func handleRequest(
+    _ message: [String: Any],
+    replyHandler: @escaping ([String: Any]) -> Void
+  ) {
+    guard
+      let path = message[Envelope.path] as? String,
+      let payload = message[Envelope.payload] as? Data
+    else {
+      replyHandler([Envelope.replyError: "malformed"])
+      return
+    }
+    let event = WearerEventDto(
+      id: message[Envelope.id] as? String ?? UUID().uuidString,
+      kind: .message,
+      path: path,
+      payload: FlutterStandardTypedData(bytes: payload),
+      sourceNodeId: "watch",
+      timestampMillis: message[Envelope.timestamp] as? Int64
+        ?? Int64(Date().timeIntervalSince1970 * 1000),
+      deliveredWhileDead: false)
+    DispatchQueue.main.async {
+      guard let handler = self.requestHandler else {
+        replyHandler([Envelope.replyError: "noHandler"])
+        return
+      }
+      handler(event) { result in
+        switch result {
+        case .success(let data):
+          replyHandler([Envelope.replyPayload: data])
+        case .failure(let error):
+          replyHandler([Envelope.replyError: "\(error)"])
+        }
+      }
+    }
   }
 
   func session(

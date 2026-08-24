@@ -358,9 +358,54 @@ class WearerLinkHostApi {
   }
 
   /// Interactive message. Requires a reachable counterpart.
-  /// On Android sends to every reachable node advertising the capability.
-  Future<void> sendMessage(String path, Uint8List payload) async {
+  /// On Android sends to every reachable capable node, or only [nodeId]
+  /// when given; iOS has a single counterpart and ignores [nodeId].
+  Future<void> sendMessage(String path, Uint8List payload, String? nodeId) async {
     final pigeonVar_channelName = 'dev.flutter.pigeon.wearer_link.WearerLinkHostApi.sendMessage$pigeonVar_messageChannelSuffix';
+    final pigeonVar_channel = BasicMessageChannel<Object?>(
+      pigeonVar_channelName,
+      pigeonChannelCodec,
+      binaryMessenger: pigeonVar_binaryMessenger,
+    );
+    final Future<Object?> pigeonVar_sendFuture = pigeonVar_channel.send(<Object?>[path, payload, nodeId]);
+    final pigeonVar_replyList = await pigeonVar_sendFuture as List<Object?>?;
+
+    _extractReplyValueOrThrow(
+        pigeonVar_replyList,
+        pigeonVar_channelName,
+        isNullValid: true,
+    )
+    ;
+  }
+
+  /// Request/response round trip: resolves with the counterpart's reply
+  /// payload. Android: MessageClient.sendRequest RPC; iOS: sendMessage
+  /// reply payload. The counterpart must have a request handler
+  /// (setRequestHandler in Dart, onRequest in WearerLinkWatch); without one
+  /// the call fails with 'noHandler'.
+  Future<Uint8List> sendRequest(String path, Uint8List payload, String? nodeId) async {
+    final pigeonVar_channelName = 'dev.flutter.pigeon.wearer_link.WearerLinkHostApi.sendRequest$pigeonVar_messageChannelSuffix';
+    final pigeonVar_channel = BasicMessageChannel<Object?>(
+      pigeonVar_channelName,
+      pigeonChannelCodec,
+      binaryMessenger: pigeonVar_binaryMessenger,
+    );
+    final Future<Object?> pigeonVar_sendFuture = pigeonVar_channel.send(<Object?>[path, payload, nodeId]);
+    final pigeonVar_replyList = await pigeonVar_sendFuture as List<Object?>?;
+
+    final Object? pigeonVar_replyValue = _extractReplyValueOrThrow(
+        pigeonVar_replyList,
+        pigeonVar_channelName,
+        isNullValid: false,
+    )
+    ;
+    return pigeonVar_replyValue! as Uint8List;
+  }
+
+  /// Persistent state sync: DataClient item (Android) /
+  /// updateApplicationContext (iOS). Latest value per path wins.
+  Future<void> syncData(String path, Uint8List payload) async {
+    final pigeonVar_channelName = 'dev.flutter.pigeon.wearer_link.WearerLinkHostApi.syncData$pigeonVar_messageChannelSuffix';
     final pigeonVar_channel = BasicMessageChannel<Object?>(
       pigeonVar_channelName,
       pigeonChannelCodec,
@@ -377,16 +422,37 @@ class WearerLinkHostApi {
     ;
   }
 
-  /// Persistent state sync: DataClient item (Android) /
-  /// updateApplicationContext (iOS). Latest value per path wins.
-  Future<void> syncData(String path, Uint8List payload) async {
-    final pigeonVar_channelName = 'dev.flutter.pigeon.wearer_link.WearerLinkHostApi.syncData$pigeonVar_messageChannelSuffix';
+  /// Latest value the COUNTERPART synced for [path] (mirror of what
+  /// dataEvents delivered), or null if it never synced one.
+  Future<Uint8List?> readSyncData(String path) async {
+    final pigeonVar_channelName = 'dev.flutter.pigeon.wearer_link.WearerLinkHostApi.readSyncData$pigeonVar_messageChannelSuffix';
     final pigeonVar_channel = BasicMessageChannel<Object?>(
       pigeonVar_channelName,
       pigeonChannelCodec,
       binaryMessenger: pigeonVar_binaryMessenger,
     );
-    final Future<Object?> pigeonVar_sendFuture = pigeonVar_channel.send(<Object?>[path, payload]);
+    final Future<Object?> pigeonVar_sendFuture = pigeonVar_channel.send(<Object?>[path]);
+    final pigeonVar_replyList = await pigeonVar_sendFuture as List<Object?>?;
+
+    final Object? pigeonVar_replyValue = _extractReplyValueOrThrow(
+        pigeonVar_replyList,
+        pigeonVar_channelName,
+        isNullValid: true,
+    )
+    ;
+    return pigeonVar_replyValue as Uint8List?;
+  }
+
+  /// Remove the value THIS device synced for [path] (the counterpart's own
+  /// value is theirs to delete).
+  Future<void> deleteSyncData(String path) async {
+    final pigeonVar_channelName = 'dev.flutter.pigeon.wearer_link.WearerLinkHostApi.deleteSyncData$pigeonVar_messageChannelSuffix';
+    final pigeonVar_channel = BasicMessageChannel<Object?>(
+      pigeonVar_channelName,
+      pigeonChannelCodec,
+      binaryMessenger: pigeonVar_binaryMessenger,
+    );
+    final Future<Object?> pigeonVar_sendFuture = pigeonVar_channel.send(<Object?>[path]);
     final pigeonVar_replyList = await pigeonVar_sendFuture as List<Object?>?;
 
     _extractReplyValueOrThrow(
@@ -460,17 +526,17 @@ class WearerLinkHostApi {
     return (pigeonVar_replyValue! as List<Object?>).cast<WearerEventDto>();
   }
 
-  /// Transfer the file at [filePath] to the counterpart.
-  /// Android: ChannelClient (needs a reachable capable node).
+  /// Transfer the file at [filePath] to the counterpart (or only [nodeId]
+  /// on Android). Android: ChannelClient (needs a reachable capable node).
   /// iOS: WCSession.transferFile (queued, survives unreachability).
-  Future<void> transferFile(String path, String filePath) async {
+  Future<void> transferFile(String path, String filePath, String? nodeId) async {
     final pigeonVar_channelName = 'dev.flutter.pigeon.wearer_link.WearerLinkHostApi.transferFile$pigeonVar_messageChannelSuffix';
     final pigeonVar_channel = BasicMessageChannel<Object?>(
       pigeonVar_channelName,
       pigeonChannelCodec,
       binaryMessenger: pigeonVar_binaryMessenger,
     );
-    final Future<Object?> pigeonVar_sendFuture = pigeonVar_channel.send(<Object?>[path, filePath]);
+    final Future<Object?> pigeonVar_sendFuture = pigeonVar_channel.send(<Object?>[path, filePath, nodeId]);
     final pigeonVar_replyList = await pigeonVar_sendFuture as List<Object?>?;
 
     _extractReplyValueOrThrow(
@@ -575,6 +641,10 @@ abstract class WearerLinkFlutterApi {
 
   void onMessage(WearerEventDto event);
 
+  /// Request from the counterpart; the returned bytes are its reply.
+  /// Completing with an error rejects the request on the sender's side.
+  Future<Uint8List> onRequest(WearerEventDto event);
+
   void onDataChanged(WearerEventDto event);
 
   void onFileReceived(WearerEventDto event);
@@ -596,6 +666,27 @@ abstract class WearerLinkFlutterApi {
           try {
             api.onMessage(arg_event);
             return wrapResponse(empty: true);
+          } on PlatformException catch (e) {
+            return wrapResponse(error: e);
+          }          catch (e) {
+            return wrapResponse(error: PlatformException(code: 'error', message: e.toString()));
+          }
+        });
+      }
+    }
+    {
+      final pigeonVar_channel = BasicMessageChannel<Object?>(
+          'dev.flutter.pigeon.wearer_link.WearerLinkFlutterApi.onRequest$messageChannelSuffix', pigeonChannelCodec,
+          binaryMessenger: binaryMessenger);
+      if (api == null) {
+        pigeonVar_channel.setMessageHandler(null);
+      } else {
+        pigeonVar_channel.setMessageHandler((Object? message) async {
+          final List<Object?> args = message! as List<Object?>;
+          final WearerEventDto arg_event = args[0]! as WearerEventDto;
+          try {
+            final Uint8List output = await api.onRequest(arg_event);
+            return wrapResponse(result: output);
           } on PlatformException catch (e) {
             return wrapResponse(error: e);
           }          catch (e) {

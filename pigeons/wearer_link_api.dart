@@ -14,7 +14,7 @@ import 'package:pigeon/pigeon.dart';
     kotlinOut:
         'android/src/main/kotlin/com/crdzbird/wearer_link/Messages.g.kt',
     kotlinOptions: KotlinOptions(package: 'com.crdzbird.wearer_link'),
-    swiftOut: 'ios/Classes/Messages.g.swift',
+    swiftOut: 'ios/wearer_link/Sources/wearer_link/Messages.g.swift',
     swiftOptions: SwiftOptions(),
     dartPackageName: 'wearer_link',
   ),
@@ -108,14 +108,33 @@ abstract class WearerLinkHostApi {
   CompanionStatusDto getCompanionStatus();
 
   /// Interactive message. Requires a reachable counterpart.
-  /// On Android sends to every reachable node advertising the capability.
+  /// On Android sends to every reachable capable node, or only [nodeId]
+  /// when given; iOS has a single counterpart and ignores [nodeId].
   @async
-  void sendMessage(String path, Uint8List payload);
+  void sendMessage(String path, Uint8List payload, String? nodeId);
+
+  /// Request/response round trip: resolves with the counterpart's reply
+  /// payload. Android: MessageClient.sendRequest RPC; iOS: sendMessage
+  /// reply payload. The counterpart must have a request handler
+  /// (setRequestHandler in Dart, onRequest in WearerLinkWatch); without one
+  /// the call fails with 'noHandler'.
+  @async
+  Uint8List sendRequest(String path, Uint8List payload, String? nodeId);
 
   /// Persistent state sync: DataClient item (Android) /
   /// updateApplicationContext (iOS). Latest value per path wins.
   @async
   void syncData(String path, Uint8List payload);
+
+  /// Latest value the COUNTERPART synced for [path] (mirror of what
+  /// dataEvents delivered), or null if it never synced one.
+  @async
+  Uint8List? readSyncData(String path);
+
+  /// Remove the value THIS device synced for [path] (the counterpart's own
+  /// value is theirs to delete).
+  @async
+  void deleteSyncData(String path);
 
   /// Queued background transfer that survives unreachability:
   /// DataClient with urgent flag (Android) / transferUserInfo (iOS).
@@ -134,11 +153,11 @@ abstract class WearerLinkHostApi {
   @async
   List<WearerEventDto> drainPendingEvents();
 
-  /// Transfer the file at [filePath] to the counterpart.
-  /// Android: ChannelClient (needs a reachable capable node).
+  /// Transfer the file at [filePath] to the counterpart (or only [nodeId]
+  /// on Android). Android: ChannelClient (needs a reachable capable node).
   /// iOS: WCSession.transferFile (queued, survives unreachability).
   @async
-  void transferFile(String path, String filePath);
+  void transferFile(String path, String filePath, String? nodeId);
 
   /// Push fresh complication data to the watch face.
   /// iOS: transferCurrentComplicationUserInfo (budgeted by watchOS — ~50/day;
@@ -170,6 +189,11 @@ abstract class WearerLinkHostApi {
 @FlutterApi()
 abstract class WearerLinkFlutterApi {
   void onMessage(WearerEventDto event);
+
+  /// Request from the counterpart; the returned bytes are its reply.
+  /// Completing with an error rejects the request on the sender's side.
+  @async
+  Uint8List onRequest(WearerEventDto event);
 
   void onDataChanged(WearerEventDto event);
 

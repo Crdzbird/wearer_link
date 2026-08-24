@@ -68,15 +68,8 @@ class DataLayerBridge(private val context: Context) {
     }
   }
 
-  suspend fun sendMessage(userPath: String, payload: ByteArray) {
-    val nodes = capableNodes()
-    if (nodes.isEmpty()) {
-      throw FlutterError(
-        "unreachable",
-        "No reachable node advertises the '${WireProtocol.CAPABILITY}' capability.",
-        null,
-      )
-    }
+  suspend fun sendMessage(userPath: String, payload: ByteArray, nodeId: String?) {
+    val nodes = targetNodes(nodeId)
     val wirePath = WireProtocol.messagePath(userPath)
     for (node in nodes) {
       try {
@@ -85,6 +78,99 @@ class DataLayerBridge(private val context: Context) {
         throw FlutterError("sendFailed", "sendMessage to ${node.id} failed: $e", null)
       }
     }
+  }
+
+  /**
+   * Request/response RPC over MessageClient.sendRequest. Targets one node:
+   * [nodeId] when given, otherwise the sole capable node (several capable
+   * nodes without a nodeId is ambiguous for a round trip — typed error).
+   */
+  suspend fun sendRequest(userPath: String, payload: ByteArray, nodeId: String?): ByteArray {
+    val nodes = targetNodes(nodeId)
+    val node = nodes.singleOrNull()
+      ?: throw FlutterError(
+        "sendFailed",
+        "sendRequest needs exactly one target; ${nodes.size} capable nodes " +
+          "are reachable — pass nodeId.",
+        null,
+      )
+    return try {
+      messageClient.sendRequest(node.id, WireProtocol.requestPath(userPath), payload).await()
+    } catch (e: Exception) {
+      // The receiver rejecting (no handler / handler threw) surfaces here
+      // as a failed Task; the wire does not carry the reason across.
+      throw FlutterError("sendFailed", "sendRequest to ${node.id} failed: $e", null)
+    }
+  }
+
+  /** Latest value the counterpart synced for [userPath], newest wins. */
+  suspend fun readSyncData(userPath: String): ByteArray? {
+    val localId = try {
+      nodeClient.localNode.await().id
+    } catch (e: Exception) {
+      throw FlutterError("unknown", "localNode failed: $e", null)
+    }
+    val wirePath = WireProtocol.syncPath(userPath)
+    val buffer = try {
+      dataClient.getDataItems(
+        Uri.Builder().scheme("wear").path(wirePath).build(),
+        com.google.android.gms.wearable.DataClient.FILTER_LITERAL,
+      ).await()
+    } catch (e: Exception) {
+      throw FlutterError("unknown", "getDataItems($wirePath) failed: $e", null)
+    }
+    try {
+      var newest: ByteArray? = null
+      var newestTs = Long.MIN_VALUE
+      for (item in buffer) {
+        if (item.uri.host == localId) continue // our own synced value
+        val map = com.google.android.gms.wearable.DataMapItem.fromDataItem(item.freeze()).dataMap
+        val ts = map.getLong(WireProtocol.KEY_TIMESTAMP, 0L)
+        if (ts >= newestTs) {
+          newestTs = ts
+          newest = map.getByteArray(WireProtocol.KEY_PAYLOAD)
+        }
+      }
+      return newest
+    } finally {
+      buffer.release()
+    }
+  }
+
+  /** Delete the value THIS device synced for [userPath]. */
+  suspend fun deleteSyncData(userPath: String) {
+    val localId = try {
+      nodeClient.localNode.await().id
+    } catch (e: Exception) {
+      throw FlutterError("unknown", "localNode failed: $e", null)
+    }
+    val uri = Uri.Builder()
+      .scheme("wear")
+      .authority(localId)
+      .path(WireProtocol.syncPath(userPath))
+      .build()
+    try {
+      dataClient.deleteDataItems(uri).await()
+    } catch (e: Exception) {
+      throw FlutterError("unknown", "deleteDataItems($uri) failed: $e", null)
+    }
+  }
+
+  private suspend fun targetNodes(nodeId: String?): Set<Node> {
+    val nodes = capableNodes()
+    if (nodes.isEmpty()) {
+      throw FlutterError(
+        "unreachable",
+        "No reachable node advertises the '${WireProtocol.CAPABILITY}' capability.",
+        null,
+      )
+    }
+    if (nodeId == null) return nodes
+    val match = nodes.filter { it.id == nodeId }.toSet()
+    if (match.isEmpty()) {
+      throw FlutterError("unreachable", "Node $nodeId is not reachable/capable.", null)
+    }
+    return match
   }
 
   suspend fun syncData(userPath: String, payload: ByteArray) {
@@ -121,19 +207,12 @@ class DataLayerBridge(private val context: Context) {
    * ChannelClient channel; the receiver's WearerLinkListenerService writes
    * it into its cache dir and emits a file event.
    */
-  suspend fun transferFile(userPath: String, filePath: String) {
+  suspend fun transferFile(userPath: String, filePath: String, nodeId: String?) {
     val file = File(filePath)
     if (!file.isFile) {
       throw FlutterError("sendFailed", "No such file: $filePath", null)
     }
-    val nodes = capableNodes()
-    if (nodes.isEmpty()) {
-      throw FlutterError(
-        "unreachable",
-        "No reachable node advertises the '${WireProtocol.CAPABILITY}' capability.",
-        null,
-      )
-    }
+    val nodes = targetNodes(nodeId)
     for (node in nodes) {
       val wirePath = WireProtocol.filePath(userPath, UUID.randomUUID().toString())
       val channel = try {

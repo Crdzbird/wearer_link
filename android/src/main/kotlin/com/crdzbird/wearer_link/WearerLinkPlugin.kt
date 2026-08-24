@@ -48,12 +48,14 @@ class WearerLinkPlugin : FlutterPlugin, WearerLinkHostApi {
       bridge?.addCapabilityListener(capabilityListener)
     }
     liveDispatcher = ::dispatchToDart
+    liveRequestHandler = ::requestToDart
     claimedLiveDispatch = true
   }
 
   override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
     if (claimedLiveDispatch) {
       liveDispatcher = null
+      liveRequestHandler = null
       claimedLiveDispatch = false
     }
     WearerLinkHostApi.setUp(binding.binaryMessenger, null)
@@ -77,9 +79,33 @@ class WearerLinkPlugin : FlutterPlugin, WearerLinkHostApi {
   override fun sendMessage(
     path: String,
     payload: ByteArray,
+    nodeId: String?,
     callback: (Result<Unit>) -> Unit,
   ) {
-    launchWith(callback) { it.sendMessage(path, payload) }
+    launchWith(callback) { it.sendMessage(path, payload, nodeId) }
+  }
+
+  override fun sendRequest(
+    path: String,
+    payload: ByteArray,
+    nodeId: String?,
+    callback: (Result<ByteArray>) -> Unit,
+  ) {
+    launchWith(callback) { it.sendRequest(path, payload, nodeId) }
+  }
+
+  override fun readSyncData(
+    path: String,
+    callback: (Result<ByteArray?>) -> Unit,
+  ) {
+    launchWith(callback) { it.readSyncData(path) }
+  }
+
+  override fun deleteSyncData(
+    path: String,
+    callback: (Result<Unit>) -> Unit,
+  ) {
+    launchWith(callback) { it.deleteSyncData(path) }
   }
 
   override fun syncData(
@@ -105,9 +131,10 @@ class WearerLinkPlugin : FlutterPlugin, WearerLinkHostApi {
   override fun transferFile(
     path: String,
     filePath: String,
+    nodeId: String?,
     callback: (Result<Unit>) -> Unit,
   ) {
-    launchWith(callback) { it.transferFile(path, filePath) }
+    launchWith(callback) { it.transferFile(path, filePath, nodeId) }
   }
 
   override fun updateComplication(
@@ -207,6 +234,15 @@ class WearerLinkPlugin : FlutterPlugin, WearerLinkHostApi {
     }
   }
 
+  /** Routes an inbound RPC to the Dart request handler. Main thread. */
+  private fun requestToDart(dto: WearerEventDto, completion: (Result<ByteArray>) -> Unit) {
+    val api = flutterApi
+      ?: return completion(Result.failure(IllegalStateException("engine detached")))
+    api.onRequest(dto) { result ->
+      completion(result)
+    }
+  }
+
   companion object {
     /**
      * Set while a Flutter engine is attached; the background listener
@@ -215,5 +251,13 @@ class WearerLinkPlugin : FlutterPlugin, WearerLinkHostApi {
      */
     @Volatile
     internal var liveDispatcher: ((WearerEventDto) -> Unit)? = null
+
+    /**
+     * Answers MessageClient.sendRequest RPCs while an engine is attached.
+     * Called on the main thread; completion may fire on any thread.
+     */
+    @Volatile
+    internal var liveRequestHandler:
+      ((WearerEventDto, (Result<ByteArray>) -> Unit) -> Unit)? = null
   }
 }

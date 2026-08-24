@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:wearer_link/wearer_link.dart';
@@ -78,6 +79,13 @@ class _HomePageState extends State<HomePage> {
     _link
         .registerBackgroundHandler(demoBackgroundHandler)
         .catchError((Object e) => _append('bg register failed: $e'));
+    // Answer sendRequest round trips from the counterpart: echo, uppercased.
+    _link.setRequestHandler((request) async {
+      _append('request ${request.path}: ${_decode(request.payload)}');
+      return Uint8List.fromList(
+        utf8.encode(_decode(request.payload).toUpperCase()),
+      );
+    });
   }
 
   @override
@@ -170,6 +178,26 @@ class _HomePageState extends State<HomePage> {
                     ),
                   ),
                   child: const Text('Transfer'),
+                ),
+                FilledButton.tonal(
+                  onPressed: () => _run('request', () async {
+                    final reply = await _link.sendRequest(
+                      '/echo',
+                      Uint8List.fromList(utf8.encode('hello rpc')),
+                    );
+                    _append('reply: ${_decode(reply)}');
+                  }),
+                  child: const Text('Request'),
+                ),
+                FilledButton.tonal(
+                  onPressed: () => _run('read', () async {
+                    final value = await _link.readSyncData('/counter');
+                    _append(
+                      'sync /counter = '
+                      '${value == null ? 'null' : _decode(value)}',
+                    );
+                  }),
+                  child: const Text('Read sync'),
                 ),
                 FilledButton.tonal(
                   onPressed: () => _run('file', () async {
