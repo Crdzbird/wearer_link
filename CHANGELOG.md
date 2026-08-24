@@ -18,7 +18,7 @@ Working prototype.
 * watchOS: `WearerLinkWatch` Swift package for native watch apps
   (activate/send/sync/transfer/wake, startup event buffering).
 
-## 1.1.1
+## 1.2.0
 
 Example app: real media, rendered.
 
