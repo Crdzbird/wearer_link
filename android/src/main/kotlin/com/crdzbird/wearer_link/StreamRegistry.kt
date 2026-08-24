@@ -149,6 +149,55 @@ internal object StreamRegistry {
   }
 }
 
+/** Cross-restart delivery counters backing getPersistentStats. */
+internal object StatsStore {
+  private const val PREFS = "wearer_link_stats"
+
+  private fun prefs(context: Context) =
+    context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+
+  @Synchronized
+  fun increment(context: Context, key: String, by: Int = 1) {
+    val p = prefs(context)
+    ensureEpoch(context)
+    p.edit().putLong(key, p.getLong(key, 0L) + by).apply()
+  }
+
+  @Synchronized
+  fun snapshot(context: Context): PersistentStatsDto {
+    ensureEpoch(context)
+    val p = prefs(context)
+    return PersistentStatsDto(
+      receivedTotal = p.getLong(KEY_RECEIVED, 0L),
+      queuedWhileDead = p.getLong(KEY_QUEUED, 0L),
+      drained = p.getLong(KEY_DRAINED, 0L),
+      backgroundHandled = p.getLong(KEY_BACKGROUND, 0L),
+      sinceMillis = p.getLong(KEY_SINCE, System.currentTimeMillis()),
+    )
+  }
+
+  @Synchronized
+  fun reset(context: Context) {
+    prefs(context).edit()
+      .clear()
+      .putLong(KEY_SINCE, System.currentTimeMillis())
+      .apply()
+  }
+
+  private fun ensureEpoch(context: Context) {
+    val p = prefs(context)
+    if (!p.contains(KEY_SINCE)) {
+      p.edit().putLong(KEY_SINCE, System.currentTimeMillis()).apply()
+    }
+  }
+
+  const val KEY_RECEIVED = "received"
+  const val KEY_QUEUED = "queued"
+  const val KEY_DRAINED = "drained"
+  const val KEY_BACKGROUND = "background"
+  private const val KEY_SINCE = "since"
+}
+
 /**
  * Persisted delivery switch: while disabled every inbound event diverts to
  * the pending queue (nothing lost, nothing delivered) and incoming streams

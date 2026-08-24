@@ -63,6 +63,18 @@ class _FakeHost extends WearerLinkHostApi {
       syncStore.keys.where((p) => p.startsWith(prefix)).toList();
 
   @override
+  Future<PersistentStatsDto> getPersistentStats() async => PersistentStatsDto(
+        receivedTotal: 10,
+        queuedWhileDead: 4,
+        drained: 3,
+        backgroundHandled: 1,
+        sinceMillis: 1000,
+      );
+
+  @override
+  Future<void> resetPersistentStats() async {}
+
+  @override
   Future<void> syncData(String path, Uint8List payload) async =>
       synced.add((path, payload));
 

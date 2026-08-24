@@ -13,6 +13,7 @@ struct RunnerWatchApp: App {
 
 struct ContentView: View {
   @State private var log: [String] = []
+  @State private var storeValue = "store: (empty)"
   @State private var reachable = false
   @State private var counter = 0
 
@@ -42,6 +43,14 @@ struct ContentView: View {
           }
         }
       }
+      Text(storeValue).font(.caption2).foregroundStyle(.cyan)
+      Button("Store set") {
+        try? WearerLinkWatch.shared.store.set(
+          "demo",
+          Data("watch \(Date().formatted(date: .omitted, time: .standard))".utf8)
+        )
+        refreshStore()
+      }
       Button("Sync counter") {
         counter += 1
         try? WearerLinkWatch.shared.syncData(
@@ -63,6 +72,11 @@ struct ContentView: View {
         append("\(event.isDataEvent ? "data" : "msg") \(event.path): "
           + String(decoding: event.payload, as: UTF8.self))
       }
+      WearerLinkWatch.shared.store.onChange = { key, value in
+        append("store \(key) changed")
+        refreshStore()
+      }
+      refreshStore()
       // Echo phone-initiated streams back, uppercased.
       WearerLinkWatch.shared.onIncomingStream = { stream in
         append("stream in \(stream.path)")
@@ -82,6 +96,12 @@ struct ContentView: View {
           .uppercased().utf8))
       }
     }
+  }
+
+  private func refreshStore() {
+    let value = WearerLinkWatch.shared.store.get("demo")
+    storeValue = value.map { "store: \(String(decoding: $0, as: UTF8.self))" }
+      ?? "store: (empty)"
   }
 
   private func append(_ line: String) {

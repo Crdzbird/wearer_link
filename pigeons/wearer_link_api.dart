@@ -192,6 +192,34 @@ class CounterpartVitalsDto {
   String osVersion;
 }
 
+/// Native, cross-restart delivery counters — the half of the story the
+/// Dart session cannot see (what happened while the app was dead).
+class PersistentStatsDto {
+  PersistentStatsDto({
+    required this.receivedTotal,
+    required this.queuedWhileDead,
+    required this.drained,
+    required this.backgroundHandled,
+    required this.sinceMillis,
+  });
+
+  /// Every event the native receive path accepted (alive or dead).
+  int receivedTotal;
+
+  /// Events diverted to the persistent queue (killed app / delivery off).
+  int queuedWhileDead;
+
+  /// Events drained out of the queue into a launch replay.
+  int drained;
+
+  /// Events acked by the headless background isolate.
+  int backgroundHandled;
+
+  /// When these counters started (epoch ms; reset on
+  /// [WearerLinkHostApi.resetPersistentStats]).
+  int sinceMillis;
+}
+
 /// Dart -> native.
 @HostApi()
 abstract class WearerLinkHostApi {
@@ -239,6 +267,14 @@ abstract class WearerLinkHostApi {
   /// values combined. Powers the synced store's key listing.
   @async
   List<String> listSyncPaths(String prefix);
+
+  /// Native delivery counters that survive app restarts.
+  @async
+  PersistentStatsDto getPersistentStats();
+
+  /// Zero the persistent counters and restart their epoch.
+  @async
+  void resetPersistentStats();
 
   /// Queued background transfer that survives unreachability:
   /// DataClient with urgent flag (Android) / transferUserInfo (iOS).

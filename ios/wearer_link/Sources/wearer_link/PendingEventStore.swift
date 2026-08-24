@@ -1,6 +1,56 @@
 import Flutter
 import Foundation
 
+/// Cross-restart delivery counters backing getPersistentStats.
+final class StatsStore {
+  static let shared = StatsStore()
+
+  static let keyReceived = "wearer_link_stats_received"
+  static let keyQueued = "wearer_link_stats_queued"
+  static let keyDrained = "wearer_link_stats_drained"
+  static let keyBackground = "wearer_link_stats_background"
+  private static let keySince = "wearer_link_stats_since"
+
+  private let defaults = UserDefaults.standard
+  private let queue = DispatchQueue(label: "com.crdzbird.wearer_link.stats")
+
+  func increment(_ key: String, by amount: Int = 1) {
+    queue.sync {
+      ensureEpoch()
+      defaults.set(defaults.integer(forKey: key) + amount, forKey: key)
+    }
+  }
+
+  func snapshot() -> PersistentStatsDto {
+    queue.sync {
+      ensureEpoch()
+      return PersistentStatsDto(
+        receivedTotal: Int64(defaults.integer(forKey: Self.keyReceived)),
+        queuedWhileDead: Int64(defaults.integer(forKey: Self.keyQueued)),
+        drained: Int64(defaults.integer(forKey: Self.keyDrained)),
+        backgroundHandled: Int64(defaults.integer(forKey: Self.keyBackground)),
+        sinceMillis: Int64(
+          defaults.object(forKey: Self.keySince) as? Double
+            ?? Date().timeIntervalSince1970 * 1000))
+    }
+  }
+
+  func reset() {
+    queue.sync {
+      for key in [Self.keyReceived, Self.keyQueued, Self.keyDrained, Self.keyBackground] {
+        defaults.removeObject(forKey: key)
+      }
+      defaults.set(Date().timeIntervalSince1970 * 1000, forKey: Self.keySince)
+    }
+  }
+
+  private func ensureEpoch() {
+    if defaults.object(forKey: Self.keySince) == nil {
+      defaults.set(Date().timeIntervalSince1970 * 1000, forKey: Self.keySince)
+    }
+  }
+}
+
 /// Bounded persistent FIFO for events that arrive while no Flutter engine is
 /// attached (background launch triggered by the watch). Mirrors the Android
 /// PendingEventStore semantics: replayed and cleared on next app launch.

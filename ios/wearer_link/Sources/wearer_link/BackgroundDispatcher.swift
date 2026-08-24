@@ -79,6 +79,7 @@ final class BackgroundDispatcher: NSObject {
     api?.onBackgroundEvent(event: event) { result in
       if case .success = result {
         PendingEventStore.shared.remove(id: event.id)
+        StatsStore.shared.increment(StatsStore.keyBackground)
       }
       // Failure: handler threw — the event stays queued for the next launch.
     }

@@ -25,6 +25,7 @@ void main() {
   transferAndDiagnosticsTests();
   cipherTests();
   audioStreamingTests();
+  persistentStatsTests();
 
   test('pair delivers messages both ways', () async {
     final (phone, watch) = WearerLinkFake.pair();
@@ -705,5 +706,51 @@ void audioStreamingTests() {
     expect(received.length, 100 * 16 * 1024);
     expect(received.takeBytes(), sent.takeBytes(),
         reason: 'chunks must arrive complete and in order');
+  });
+}
+
+// ---- 1.1.0: persistent native counters ------------------------------------
+
+void persistentStatsTests() {
+  test('persistent stats count dead-queue lifecycle across relaunch',
+      () async {
+    final (phone, watch) = WearerLinkFake.pair();
+    watch.messages.listen((_) {});
+    await pumpEventQueue();
+
+    await phone.sendMessage('/live', Uint8List(0));
+    watch.simulateKill();
+    await phone.sendMessage('/dead-1', Uint8List(0));
+    await phone.sendMessage('/dead-2', Uint8List(0));
+    await pumpEventQueue();
+
+    final relaunched = watch.relaunch();
+    relaunched.messages.listen((_) {});
+    await pumpEventQueue();
+
+    final stats = await relaunched.getPersistentStats();
+    expect(stats.receivedTotal, 3);
+    expect(stats.queuedWhileDead, 2);
+    expect(stats.drained, 2);
+    expect(stats.backgroundHandled, 0);
+
+    await relaunched.resetPersistentStats();
+    final reset = await relaunched.getPersistentStats();
+    expect(reset.receivedTotal, 0);
+    expect(reset.queuedWhileDead, 0);
+  });
+
+  test('persistent stats count background-handled events', () async {
+    backgroundHandled.clear();
+    final (phone, watch) = WearerLinkFake.pair();
+    await watch.registerBackgroundHandler(fakeBackgroundHandler);
+    watch.simulateKill();
+    await phone.sendMessage('/bg', Uint8List(0));
+    await pumpEventQueue();
+
+    final stats = await watch.getPersistentStats();
+    expect(stats.backgroundHandled, 1);
+    expect(stats.queuedWhileDead, 1);
+    expect(stats.drained, 0, reason: 'acked events never drain');
   });
 }

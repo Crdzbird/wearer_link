@@ -86,6 +86,12 @@ public final class WearerLinkWatch: NSObject {
   /// refused. Main queue.
   public var onIncomingStream: ((WatchStream) -> Void)?
 
+  /// Native accessor for the synced key-value store (same keys as the
+  /// Flutter side's `WearerLink.store`).
+  public private(set) lazy var store = WatchStore(sync: { [weak self] path, payload in
+    try self?.syncData(path: path, payload: payload)
+  })
+
   /// Route/args from the phone's `launchCompanion(route:, args:)`,
   /// delivered on the main queue (queued transfer — survives the launch
   /// gap, so subscribe early in App.init).
@@ -395,6 +401,13 @@ public final class WearerLinkWatch: NSObject {
 
   private func handleInbound(_ dictionary: [String: Any], fileURL: URL? = nil) {
     guard let path = dictionary[Envelope.path] as? String else { return }
+    if path.hasPrefix(WatchStore.pathPrefix) {
+      // Reserved plugin path: a phone-side store record.
+      if let payload = dictionary[Envelope.payload] as? Data {
+        store.applyRemote(path: path, payload: payload)
+      }
+      return
+    }
     if path == Envelope.launchPath {
       // Reserved plugin path: surface as a launch intent, not an event.
       let payload = dictionary[Envelope.payload] as? Data

@@ -482,6 +482,74 @@ class CounterpartVitalsDto {
   int get hashCode => _deepHash(<Object?>[runtimeType, ..._toList()]);
 }
 
+/// Native, cross-restart delivery counters — the half of the story the
+/// Dart session cannot see (what happened while the app was dead).
+class PersistentStatsDto {
+  PersistentStatsDto({
+    required this.receivedTotal,
+    required this.queuedWhileDead,
+    required this.drained,
+    required this.backgroundHandled,
+    required this.sinceMillis,
+  });
+
+  /// Every event the native receive path accepted (alive or dead).
+  int receivedTotal;
+
+  /// Events diverted to the persistent queue (killed app / delivery off).
+  int queuedWhileDead;
+
+  /// Events drained out of the queue into a launch replay.
+  int drained;
+
+  /// Events acked by the headless background isolate.
+  int backgroundHandled;
+
+  /// When these counters started (epoch ms; reset on
+  /// [WearerLinkHostApi.resetPersistentStats]).
+  int sinceMillis;
+
+  List<Object?> _toList() {
+    return <Object?>[
+      receivedTotal,
+      queuedWhileDead,
+      drained,
+      backgroundHandled,
+      sinceMillis,
+    ];
+  }
+
+  Object encode() {
+    return _toList();  }
+
+  static PersistentStatsDto decode(Object result) {
+    result as List<Object?>;
+    return PersistentStatsDto(
+      receivedTotal: result[0]! as int,
+      queuedWhileDead: result[1]! as int,
+      drained: result[2]! as int,
+      backgroundHandled: result[3]! as int,
+      sinceMillis: result[4]! as int,
+    );
+  }
+
+  @override
+  // ignore: avoid_equals_and_hash_code_on_mutable_classes
+  bool operator ==(Object other) {
+    if (other is! PersistentStatsDto || other.runtimeType != runtimeType) {
+      return false;
+    }
+    if (identical(this, other)) {
+      return true;
+    }
+    return _deepEquals(receivedTotal, other.receivedTotal) && _deepEquals(queuedWhileDead, other.queuedWhileDead) && _deepEquals(drained, other.drained) && _deepEquals(backgroundHandled, other.backgroundHandled) && _deepEquals(sinceMillis, other.sinceMillis);
+  }
+
+  @override
+  // ignore: avoid_equals_and_hash_code_on_mutable_classes
+  int get hashCode => _deepHash(<Object?>[runtimeType, ..._toList()]);
+}
+
 
 class _PigeonCodec extends StandardMessageCodec {
   const _PigeonCodec();
@@ -514,6 +582,9 @@ class _PigeonCodec extends StandardMessageCodec {
     }    else if (value is CounterpartVitalsDto) {
       buffer.putUint8(136);
       writeValue(buffer, value.encode());
+    }    else if (value is PersistentStatsDto) {
+      buffer.putUint8(137);
+      writeValue(buffer, value.encode());
     } else {
       super.writeValue(buffer, value);
     }
@@ -541,6 +612,8 @@ class _PigeonCodec extends StandardMessageCodec {
         return WearerNodeDto.decode(readValue(buffer)!);
       case 136:
         return CounterpartVitalsDto.decode(readValue(buffer)!);
+      case 137:
+        return PersistentStatsDto.decode(readValue(buffer)!);
       default:
         return super.readValueOfType(type, buffer);
     }
@@ -746,6 +819,45 @@ class WearerLinkHostApi {
     )
     ;
     return (pigeonVar_replyValue! as List<Object?>).cast<String>();
+  }
+
+  /// Native delivery counters that survive app restarts.
+  Future<PersistentStatsDto> getPersistentStats() async {
+    final pigeonVar_channelName = 'dev.flutter.pigeon.wearer_link.WearerLinkHostApi.getPersistentStats$pigeonVar_messageChannelSuffix';
+    final pigeonVar_channel = BasicMessageChannel<Object?>(
+      pigeonVar_channelName,
+      pigeonChannelCodec,
+      binaryMessenger: pigeonVar_binaryMessenger,
+    );
+    final Future<Object?> pigeonVar_sendFuture = pigeonVar_channel.send(null);
+    final pigeonVar_replyList = await pigeonVar_sendFuture as List<Object?>?;
+
+    final Object? pigeonVar_replyValue = _extractReplyValueOrThrow(
+        pigeonVar_replyList,
+        pigeonVar_channelName,
+        isNullValid: false,
+    )
+    ;
+    return pigeonVar_replyValue! as PersistentStatsDto;
+  }
+
+  /// Zero the persistent counters and restart their epoch.
+  Future<void> resetPersistentStats() async {
+    final pigeonVar_channelName = 'dev.flutter.pigeon.wearer_link.WearerLinkHostApi.resetPersistentStats$pigeonVar_messageChannelSuffix';
+    final pigeonVar_channel = BasicMessageChannel<Object?>(
+      pigeonVar_channelName,
+      pigeonChannelCodec,
+      binaryMessenger: pigeonVar_binaryMessenger,
+    );
+    final Future<Object?> pigeonVar_sendFuture = pigeonVar_channel.send(null);
+    final pigeonVar_replyList = await pigeonVar_sendFuture as List<Object?>?;
+
+    _extractReplyValueOrThrow(
+        pigeonVar_replyList,
+        pigeonVar_channelName,
+        isNullValid: true,
+    )
+    ;
   }
 
   /// Queued background transfer that survives unreachability:

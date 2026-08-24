@@ -333,9 +333,23 @@ extension WearerLinkPlugin: WearerLinkHostApi {
     DispatchQueue.global(qos: .utility).async {
       let events = PendingEventStore.shared.drain()
         .map { $0.toDto(deliveredWhileDead: true) }
+      if !events.isEmpty {
+        StatsStore.shared.increment(StatsStore.keyDrained, by: events.count)
+      }
       DispatchQueue.main.async {
         completion(.success(events))
       }
     }
+  }
+
+  func getPersistentStats(
+    completion: @escaping (Result<PersistentStatsDto, Error>) -> Void
+  ) {
+    completion(.success(StatsStore.shared.snapshot()))
+  }
+
+  func resetPersistentStats(completion: @escaping (Result<Void, Error>) -> Void) {
+    StatsStore.shared.reset()
+    completion(.success(()))
   }
 }

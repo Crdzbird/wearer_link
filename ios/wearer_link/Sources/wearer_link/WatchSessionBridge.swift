@@ -351,8 +351,10 @@ final class WatchSessionBridge: NSObject {
       filePath: filePath
     )
     DispatchQueue.main.async {
+      StatsStore.shared.increment(StatsStore.keyReceived)
       if !self.deliveryEnabled {
         // Delivery paused: divert to the queue, wake nothing.
+        StatsStore.shared.increment(StatsStore.keyQueued)
         PendingEventStore.shared.append(event)
         return
       }
@@ -361,6 +363,7 @@ final class WatchSessionBridge: NSObject {
       } else {
         // Persist first (crash-safe), then hand to the headless isolate if
         // one is registered; its ack removes the queued copy.
+        StatsStore.shared.increment(StatsStore.keyQueued)
         PendingEventStore.shared.append(event)
         if BackgroundDispatcher.shared.isRegistered {
           BackgroundDispatcher.shared.deliver(event.toDto(deliveredWhileDead: true))

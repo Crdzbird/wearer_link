@@ -217,8 +217,10 @@ class WearerLinkListenerService : WearableListenerService() {
   }
 
   private fun dispatch(dto: WearerEventDto) {
+    StatsStore.increment(this, StatsStore.KEY_RECEIVED)
     if (!DeliveryGate.isEnabled(this)) {
       // Delivery paused: divert everything to the queue, wake nothing.
+      StatsStore.increment(this, StatsStore.KEY_QUEUED)
       PendingEventStore(this).append(dto.copy(deliveredWhileDead = true))
       return
     }
@@ -227,11 +229,17 @@ class WearerLinkListenerService : WearableListenerService() {
       mainHandler.post {
         // Re-read: the engine may have detached between check and post.
         val stillLive = WearerLinkPlugin.liveDispatcher
-        if (stillLive != null) stillLive(dto) else PendingEventStore(this).append(dto)
+        if (stillLive != null) {
+          stillLive(dto)
+        } else {
+          StatsStore.increment(this, StatsStore.KEY_QUEUED)
+          PendingEventStore(this).append(dto)
+        }
       }
     } else {
       // Persist first (crash-safe), then hand to the headless isolate if the
       // app registered one; the isolate's ack removes the queued copy.
+      StatsStore.increment(this, StatsStore.KEY_QUEUED)
       PendingEventStore(this).append(dto)
       if (BackgroundDispatcher.isRegistered(this)) {
         BackgroundDispatcher.deliver(this, dto)

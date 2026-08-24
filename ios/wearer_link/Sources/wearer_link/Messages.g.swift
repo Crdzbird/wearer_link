@@ -513,6 +513,66 @@ struct CounterpartVitalsDto: Hashable {
   }
 }
 
+/// Native, cross-restart delivery counters — the half of the story the
+/// Dart session cannot see (what happened while the app was dead).
+///
+/// Generated class from Pigeon that represents data sent in messages.
+struct PersistentStatsDto: Hashable {
+  /// Every event the native receive path accepted (alive or dead).
+  var receivedTotal: Int64
+  /// Events diverted to the persistent queue (killed app / delivery off).
+  var queuedWhileDead: Int64
+  /// Events drained out of the queue into a launch replay.
+  var drained: Int64
+  /// Events acked by the headless background isolate.
+  var backgroundHandled: Int64
+  /// When these counters started (epoch ms; reset on
+  /// [WearerLinkHostApi.resetPersistentStats]).
+  var sinceMillis: Int64
+
+
+  // swift-format-ignore: AlwaysUseLowerCamelCase
+  static func fromList(_ pigeonVar_list: [Any?]) -> PersistentStatsDto? {
+    let receivedTotal = pigeonVar_list[0] as! Int64
+    let queuedWhileDead = pigeonVar_list[1] as! Int64
+    let drained = pigeonVar_list[2] as! Int64
+    let backgroundHandled = pigeonVar_list[3] as! Int64
+    let sinceMillis = pigeonVar_list[4] as! Int64
+
+    return PersistentStatsDto(
+      receivedTotal: receivedTotal,
+      queuedWhileDead: queuedWhileDead,
+      drained: drained,
+      backgroundHandled: backgroundHandled,
+      sinceMillis: sinceMillis
+    )
+  }
+  func toList() -> [Any?] {
+    return [
+      receivedTotal,
+      queuedWhileDead,
+      drained,
+      backgroundHandled,
+      sinceMillis,
+    ]
+  }
+  static func == (lhs: PersistentStatsDto, rhs: PersistentStatsDto) -> Bool {
+    if Swift.type(of: lhs) != Swift.type(of: rhs) {
+      return false
+    }
+    return deepEqualsMessages(lhs.receivedTotal, rhs.receivedTotal) && deepEqualsMessages(lhs.queuedWhileDead, rhs.queuedWhileDead) && deepEqualsMessages(lhs.drained, rhs.drained) && deepEqualsMessages(lhs.backgroundHandled, rhs.backgroundHandled) && deepEqualsMessages(lhs.sinceMillis, rhs.sinceMillis)
+  }
+
+  func hash(into hasher: inout Hasher) {
+    hasher.combine("PersistentStatsDto")
+    deepHashMessages(value: receivedTotal, hasher: &hasher)
+    deepHashMessages(value: queuedWhileDead, hasher: &hasher)
+    deepHashMessages(value: drained, hasher: &hasher)
+    deepHashMessages(value: backgroundHandled, hasher: &hasher)
+    deepHashMessages(value: sinceMillis, hasher: &hasher)
+  }
+}
+
 private class MessagesPigeonCodecReader: FlutterStandardReader {
   override func readValue(ofType type: UInt8) -> Any? {
     switch type {
@@ -544,6 +604,8 @@ private class MessagesPigeonCodecReader: FlutterStandardReader {
       return WearerNodeDto.fromList(self.readValue() as! [Any?])
     case 136:
       return CounterpartVitalsDto.fromList(self.readValue() as! [Any?])
+    case 137:
+      return PersistentStatsDto.fromList(self.readValue() as! [Any?])
     default:
       return super.readValue(ofType: type)
     }
@@ -575,6 +637,9 @@ private class MessagesPigeonCodecWriter: FlutterStandardWriter {
       super.writeValue(value.toList())
     } else if let value = value as? CounterpartVitalsDto {
       super.writeByte(136)
+      super.writeValue(value.toList())
+    } else if let value = value as? PersistentStatsDto {
+      super.writeByte(137)
       super.writeValue(value.toList())
     } else {
       super.writeValue(value)
@@ -629,6 +694,10 @@ protocol WearerLinkHostApi {
   /// Every sync path currently stored under [prefix] — own and received
   /// values combined. Powers the synced store's key listing.
   func listSyncPaths(prefix: String, completion: @escaping (Result<[String], Error>) -> Void)
+  /// Native delivery counters that survive app restarts.
+  func getPersistentStats(completion: @escaping (Result<PersistentStatsDto, Error>) -> Void)
+  /// Zero the persistent counters and restart their epoch.
+  func resetPersistentStats(completion: @escaping (Result<Void, Error>) -> Void)
   /// Queued background transfer that survives unreachability:
   /// DataClient with urgent flag (Android) / transferUserInfo (iOS).
   func transferData(path: String, payload: FlutterStandardTypedData, completion: @escaping (Result<Void, Error>) -> Void)
@@ -866,6 +935,38 @@ class WearerLinkHostApiSetup {
       }
     } else {
       listSyncPathsChannel.setMessageHandler(nil)
+    }
+    /// Native delivery counters that survive app restarts.
+    let getPersistentStatsChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.wearer_link.WearerLinkHostApi.getPersistentStats\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+    if let api = api {
+      getPersistentStatsChannel.setMessageHandler { _, reply in
+        api.getPersistentStats { result in
+          switch result {
+          case .success(let res):
+            reply(wrapResult(res))
+          case .failure(let error):
+            reply(wrapError(error))
+          }
+        }
+      }
+    } else {
+      getPersistentStatsChannel.setMessageHandler(nil)
+    }
+    /// Zero the persistent counters and restart their epoch.
+    let resetPersistentStatsChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.wearer_link.WearerLinkHostApi.resetPersistentStats\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+    if let api = api {
+      resetPersistentStatsChannel.setMessageHandler { _, reply in
+        api.resetPersistentStats { result in
+          switch result {
+          case .success:
+            reply(wrapResult(nil))
+          case .failure(let error):
+            reply(wrapError(error))
+          }
+        }
+      }
+    } else {
+      resetPersistentStatsChannel.setMessageHandler(nil)
     }
     /// Queued background transfer that survives unreachability:
     /// DataClient with urgent flag (Android) / transferUserInfo (iOS).

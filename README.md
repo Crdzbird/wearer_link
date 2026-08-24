@@ -91,6 +91,8 @@ await transfer.done;
 // Diagnostics
 final rtt = await wearer.pingLatency();          // built-in responder RTT
 print(wearer.stats);                             // session counters
+print(await wearer.getPersistentStats());        // native, survives restarts:
+                                                 // queued/drained/bg-handled
 wearer.diagnostics.listen(print);                // silent failures, surfaced
 WearerLink.verboseLogging = true;
 
@@ -185,6 +187,11 @@ struct MyWatchApp: App {
   }
   var body: some Scene { WindowGroup { ContentView() } }
 }
+
+// Synced store, native side (same keys as WearerLink.store):
+try WearerLinkWatch.shared.store.set("workout", data)
+let value = WearerLinkWatch.shared.store.get("workout")
+WearerLinkWatch.shared.store.onChange = { key, value in ... }
 
 // Sending:
 WearerLinkWatch.shared.sendMessage(path: "/ping", payload: data)  // wakes killed phone app

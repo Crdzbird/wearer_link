@@ -128,6 +128,7 @@ internal object BackgroundDispatcher : WearerLinkBackgroundHostApi {
     activeApi.onBackgroundEvent(dto) { result ->
       if (result.isSuccess) {
         PendingEventStore(context).remove(dto.id)
+        StatsStore.increment(context, StatsStore.KEY_BACKGROUND)
       }
       // Failure: the handler threw or the isolate died — the event stays in
       // the persistent queue and replays on the next foreground launch.

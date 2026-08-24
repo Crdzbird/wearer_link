@@ -179,7 +179,9 @@ class _FakeHost extends WearerLinkHostApi {
   /// Deliver [dto] into this endpoint through the same decision tree the
   /// native listener services use: gate -> live -> background -> queue.
   void receive(WearerEventDto dto) {
+    receivedTotal++;
     if (!deliveryEnabled) {
+      queuedWhileDead++;
       pendingQueue.add(_asDead(dto));
       return;
     }
@@ -198,12 +200,14 @@ class _FakeHost extends WearerLinkHostApi {
     // App is "killed": persist first (crash-safe in production), then the
     // background handler's completion acks it back out of the queue.
     final dead = _asDead(dto);
+    queuedWhileDead++;
     pendingQueue.add(dead);
     final handler = backgroundHandler;
     if (handler != null) {
-      handler(WearerEvent.fromDto(dead))
-          .then((_) => pendingQueue.removeWhere((e) => e.id == dead.id))
-          .catchError((_) {/* stays queued for the next launch */});
+      handler(WearerEvent.fromDto(dead)).then((_) {
+        pendingQueue.removeWhere((e) => e.id == dead.id);
+        backgroundHandledTotal++;
+      }).catchError((_) {/* stays queued for the next launch */});
     }
   }
 
@@ -342,6 +346,29 @@ class _FakeHost extends WearerLinkHostApi {
   @override
   Future<Uint8List?> readOwnSyncData(String path) async => syncedByMe[path];
 
+  int receivedTotal = 0;
+  int queuedWhileDead = 0;
+  int drainedTotal = 0;
+  int backgroundHandledTotal = 0;
+  final statsSince = DateTime.now();
+
+  @override
+  Future<PersistentStatsDto> getPersistentStats() async => PersistentStatsDto(
+        receivedTotal: receivedTotal,
+        queuedWhileDead: queuedWhileDead,
+        drained: drainedTotal,
+        backgroundHandled: backgroundHandledTotal,
+        sinceMillis: statsSince.millisecondsSinceEpoch,
+      );
+
+  @override
+  Future<void> resetPersistentStats() async {
+    receivedTotal = 0;
+    queuedWhileDead = 0;
+    drainedTotal = 0;
+    backgroundHandledTotal = 0;
+  }
+
   @override
   Future<List<String>> listSyncPaths(String prefix) async => {
         ...syncedByMe.keys,
@@ -458,6 +485,7 @@ class _FakeHost extends WearerLinkHostApi {
   @override
   Future<List<WearerEventDto>> drainPendingEvents() async {
     final drained = List.of(pendingQueue);
+    drainedTotal += drained.length;
     pendingQueue.clear();
     return drained;
   }

@@ -561,6 +561,69 @@ data class CounterpartVitalsDto (
     return result
   }
 }
+
+/**
+ * Native, cross-restart delivery counters — the half of the story the
+ * Dart session cannot see (what happened while the app was dead).
+ *
+ * Generated class from Pigeon that represents data sent in messages.
+ */
+data class PersistentStatsDto (
+  /** Every event the native receive path accepted (alive or dead). */
+  val receivedTotal: Long,
+  /** Events diverted to the persistent queue (killed app / delivery off). */
+  val queuedWhileDead: Long,
+  /** Events drained out of the queue into a launch replay. */
+  val drained: Long,
+  /** Events acked by the headless background isolate. */
+  val backgroundHandled: Long,
+  /**
+   * When these counters started (epoch ms; reset on
+   * [WearerLinkHostApi.resetPersistentStats]).
+   */
+  val sinceMillis: Long
+)
+ {
+  companion object {
+    fun fromList(pigeonVar_list: List<Any?>): PersistentStatsDto {
+      val receivedTotal = pigeonVar_list[0] as Long
+      val queuedWhileDead = pigeonVar_list[1] as Long
+      val drained = pigeonVar_list[2] as Long
+      val backgroundHandled = pigeonVar_list[3] as Long
+      val sinceMillis = pigeonVar_list[4] as Long
+      return PersistentStatsDto(receivedTotal, queuedWhileDead, drained, backgroundHandled, sinceMillis)
+    }
+  }
+  fun toList(): List<Any?> {
+    return listOf(
+      receivedTotal,
+      queuedWhileDead,
+      drained,
+      backgroundHandled,
+      sinceMillis,
+    )
+  }
+  override fun equals(other: Any?): Boolean {
+    if (other == null || other.javaClass != javaClass) {
+      return false
+    }
+    if (this === other) {
+      return true
+    }
+    val other = other as PersistentStatsDto
+    return MessagesPigeonUtils.deepEquals(this.receivedTotal, other.receivedTotal) && MessagesPigeonUtils.deepEquals(this.queuedWhileDead, other.queuedWhileDead) && MessagesPigeonUtils.deepEquals(this.drained, other.drained) && MessagesPigeonUtils.deepEquals(this.backgroundHandled, other.backgroundHandled) && MessagesPigeonUtils.deepEquals(this.sinceMillis, other.sinceMillis)
+  }
+
+  override fun hashCode(): Int {
+    var result = javaClass.hashCode()
+    result = 31 * result + MessagesPigeonUtils.deepHash(this.receivedTotal)
+    result = 31 * result + MessagesPigeonUtils.deepHash(this.queuedWhileDead)
+    result = 31 * result + MessagesPigeonUtils.deepHash(this.drained)
+    result = 31 * result + MessagesPigeonUtils.deepHash(this.backgroundHandled)
+    result = 31 * result + MessagesPigeonUtils.deepHash(this.sinceMillis)
+    return result
+  }
+}
 private open class MessagesPigeonCodec : StandardMessageCodec() {
   override fun readValueOfType(type: Byte, buffer: ByteBuffer): Any? {
     return when (type) {
@@ -604,6 +667,11 @@ private open class MessagesPigeonCodec : StandardMessageCodec() {
           CounterpartVitalsDto.fromList(it)
         }
       }
+      137.toByte() -> {
+        return (readValue(buffer) as? List<Any?>)?.let {
+          PersistentStatsDto.fromList(it)
+        }
+      }
       else -> super.readValueOfType(type, buffer)
     }
   }
@@ -639,6 +707,10 @@ private open class MessagesPigeonCodec : StandardMessageCodec() {
       }
       is CounterpartVitalsDto -> {
         stream.write(136)
+        writeValue(stream, value.toList())
+      }
+      is PersistentStatsDto -> {
+        stream.write(137)
         writeValue(stream, value.toList())
       }
       else -> super.writeValue(stream, value)
@@ -695,6 +767,10 @@ interface WearerLinkHostApi {
    * values combined. Powers the synced store's key listing.
    */
   fun listSyncPaths(prefix: String, callback: (Result<List<String>>) -> Unit)
+  /** Native delivery counters that survive app restarts. */
+  fun getPersistentStats(callback: (Result<PersistentStatsDto>) -> Unit)
+  /** Zero the persistent counters and restart their epoch. */
+  fun resetPersistentStats(callback: (Result<Unit>) -> Unit)
   /**
    * Queued background transfer that survives unreachability:
    * DataClient with urgent flag (Android) / transferUserInfo (iOS).
@@ -956,6 +1032,41 @@ interface WearerLinkHostApi {
               } else {
                 val data = result.getOrNull()
                 reply.reply(MessagesPigeonUtils.wrapResult(data))
+              }
+            }
+          }
+        } else {
+          channel.setMessageHandler(null)
+        }
+      }
+      run {
+        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.wearer_link.WearerLinkHostApi.getPersistentStats$separatedMessageChannelSuffix", codec)
+        if (api != null) {
+          channel.setMessageHandler { _, reply ->
+            api.getPersistentStats{ result: Result<PersistentStatsDto> ->
+              val error = result.exceptionOrNull()
+              if (error != null) {
+                reply.reply(MessagesPigeonUtils.wrapError(error))
+              } else {
+                val data = result.getOrNull()
+                reply.reply(MessagesPigeonUtils.wrapResult(data))
+              }
+            }
+          }
+        } else {
+          channel.setMessageHandler(null)
+        }
+      }
+      run {
+        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.wearer_link.WearerLinkHostApi.resetPersistentStats$separatedMessageChannelSuffix", codec)
+        if (api != null) {
+          channel.setMessageHandler { _, reply ->
+            api.resetPersistentStats{ result: Result<Unit> ->
+              val error = result.exceptionOrNull()
+              if (error != null) {
+                reply.reply(MessagesPigeonUtils.wrapError(error))
+              } else {
+                reply.reply(MessagesPigeonUtils.wrapResult(null))
               }
             }
           }

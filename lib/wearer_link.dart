@@ -273,6 +273,24 @@ class WearerLink {
         activeStreams: _streams.length,
       );
 
+  /// Native delivery counters that survive app restarts — what happened
+  /// while this app was dead (queued, drained, background-handled).
+  /// Session-scoped counters live on [stats].
+  Future<WearerPersistentStats> getPersistentStats() => _guard(() async {
+        final dto = await _host.getPersistentStats();
+        return WearerPersistentStats(
+          receivedTotal: dto.receivedTotal,
+          queuedWhileDead: dto.queuedWhileDead,
+          drained: dto.drained,
+          backgroundHandled: dto.backgroundHandled,
+          since: DateTime.fromMillisecondsSinceEpoch(dto.sinceMillis),
+        );
+      });
+
+  /// Zero the persistent counters and restart their epoch.
+  Future<void> resetPersistentStats() =>
+      _guard(() => _host.resetPersistentStats());
+
   /// Plugin-internal happenings that would otherwise die silently:
   /// abnormal stream closes, failed tracked transfers.
   Stream<WearerDiagnostic> get diagnostics => _diagnostics.stream;

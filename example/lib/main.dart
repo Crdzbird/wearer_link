@@ -46,6 +46,7 @@ class _HomePageState extends State<HomePage> {
 
   WearerCompanionStatus? _status;
   int _counter = 0;
+  Timer? _startupProbe;
 
   // Live transfer feedback for the photo/stream demos.
   double? _transferProgress;
@@ -90,6 +91,19 @@ class _HomePageState extends State<HomePage> {
         ),
       );
     _refreshStatus();
+    // Headless verification aid: log link state to the console on startup.
+    _startupProbe = Timer(const Duration(seconds: 3), () async {
+      try {
+        final value = await _link.store.get('demo');
+        debugPrint(
+          'wearer_demo startup store.get(demo) = '
+          '${value == null ? 'null' : _decode(value)}',
+        );
+        debugPrint('wearer_demo startup ${await _link.getPersistentStats()}');
+      } catch (e) {
+        debugPrint('wearer_demo startup probe failed: $e');
+      }
+    });
     _link
         .registerBackgroundHandler(demoBackgroundHandler)
         .catchError((Object e) => _append('bg register failed: $e'));
@@ -120,6 +134,7 @@ class _HomePageState extends State<HomePage> {
 
   @override
   void dispose() {
+    _startupProbe?.cancel();
     for (final s in _subscriptions) {
       s.cancel();
     }
@@ -311,6 +326,7 @@ class _HomePageState extends State<HomePage> {
                     _append('nodes: $nodes');
                     final status = await _link.getCounterpartVitals();
                     _append('counterpart: $status');
+                    _append('persistent: ${await _link.getPersistentStats()}');
                   }),
                   child: const Text('Status'),
                 ),

@@ -145,7 +145,7 @@ counterpart-status verified on the simulator pair; CI green; CHANGELOG.
 
 The features that make companion apps product-shaped.
 
-### 7.1 Synced KV store ✅ shipped (Dart endpoints; watchOS-native accessor -> M8 backlog)
+### 7.1 Synced KV store ✅ shipped (watchOS-native accessor landed in 1.1.0)
 
 ```dart
 final store = wearer.store;                  // WearerStore
@@ -181,7 +181,7 @@ await transfer.done;
   fallback for untracked transfers.
 - Effort: M.
 
-### 7.3 Diagnostics & link quality ✅ shipped (session-scoped; persistent native counters deferred)
+### 7.3 Diagnostics & link quality ✅ shipped (persistent native counters landed in 1.1.0)
 
 ```dart
 wearer.diagnostics;                          // Stream<WearerDiagnostic>

@@ -258,8 +258,20 @@ class WearerLinkPlugin : FlutterPlugin, WearerLinkHostApi {
     val activeScope = scope ?: return
     activeScope.launch(Dispatchers.IO) {
       val events = activeStore.drain()
+      if (events.isNotEmpty()) {
+        StatsStore.increment(context, StatsStore.KEY_DRAINED, events.size)
+      }
       mainHandler.post { callback(Result.success(events)) }
     }
+  }
+
+  override fun getPersistentStats(callback: (Result<PersistentStatsDto>) -> Unit) {
+    callback(Result.success(StatsStore.snapshot(context)))
+  }
+
+  override fun resetPersistentStats(callback: (Result<Unit>) -> Unit) {
+    StatsStore.reset(context)
+    callback(Result.success(Unit))
   }
 
   // -- internals ------------------------------------------------------------

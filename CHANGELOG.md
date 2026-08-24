@@ -18,6 +18,23 @@ Working prototype.
 * watchOS: `WearerLinkWatch` Swift package for native watch apps
   (activate/send/sync/transfer/wake, startup event buffering).
 
+## 1.1.0
+
+* **watchOS-native store accessor**: `WearerLinkWatch.shared.store` —
+  get/set/delete/keys/onChange over the same records as the Dart store
+  (LWW + tombstones, 48KB cap). Verified both directions on the simulator
+  pair: Dart set -> native onChange/get; native set -> Dart get (across a
+  simulator reboot).
+* **Persistent delivery counters**: `getPersistentStats()` /
+  `resetPersistentStats()` — native, cross-restart counts of
+  received/queued-while-dead/drained/background-handled with an epoch.
+  Hardware-verified on the Pixel pair: a dead-app ping produced
+  queuedDead:1 + bgHandled:1 + drained:0 with the epoch surviving
+  force-stop; iOS counters survived two process restarts and a simulator
+  reboot.
+* Example: startup console probe (store value + persistent stats) for
+  headless verification.
+
 ## 1.0.0
 
 First stable release. The API is now under semver: breaking Dart API

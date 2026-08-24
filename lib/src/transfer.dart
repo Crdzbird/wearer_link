@@ -86,6 +86,42 @@ class WearerStats {
       'streams: $activeStreams)';
 }
 
+/// Native, cross-restart delivery counters (see
+/// `WearerLink.getPersistentStats`) — the half of the story the Dart
+/// session cannot see: what happened while the app was dead.
+class WearerPersistentStats {
+  /// Creates a snapshot (produced by the plugin).
+  const WearerPersistentStats({
+    required this.receivedTotal,
+    required this.queuedWhileDead,
+    required this.drained,
+    required this.backgroundHandled,
+    required this.since,
+  });
+
+  /// Every event the native receive path accepted (alive or dead).
+  final int receivedTotal;
+
+  /// Events diverted to the persistent queue (killed app / delivery off).
+  final int queuedWhileDead;
+
+  /// Events drained out of the queue into a launch replay.
+  final int drained;
+
+  /// Events acked by the headless background isolate.
+  final int backgroundHandled;
+
+  /// When these counters started (reset via
+  /// `WearerLink.resetPersistentStats`).
+  final DateTime since;
+
+  @override
+  String toString() =>
+      'WearerPersistentStats(received: $receivedTotal, queuedDead: '
+      '$queuedWhileDead, drained: $drained, bgHandled: $backgroundHandled, '
+      'since: $since)';
+}
+
 /// Severity of a [WearerDiagnostic].
 enum WearerDiagnosticSeverity {
   /// Informational; no action needed.
