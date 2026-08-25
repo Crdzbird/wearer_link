@@ -4,7 +4,7 @@
 #
 Pod::Spec.new do |s|
   s.name             = 'wearer_link'
-  s.version          = '1.2.1'
+  s.version          = '1.3.0'
   s.summary          = 'Phone-to-wearable link: messaging, synced data, background delivery.'
   s.description      = <<-DESC
 Connects a Flutter iPhone app with its watchOS companion via WatchConnectivity:

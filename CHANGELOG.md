@@ -18,6 +18,21 @@ Working prototype.
 * watchOS: `WearerLinkWatch` Swift package for native watch apps
   (activate/send/sync/transfer/wake, startup event buffering).
 
+## 1.3.0
+
+* Example: one universal **Pick media** flow (file_picker, any type —
+  image/video/audio/file, SAF content URIs copied locally) followed by a
+  destination dialog: *Send to watch* (queued tracked transfer), *Play on
+  this device*, *Stream live to watch*, or *Stream on both*.
+* Live media streaming is **bidirectional on a single WearerStream**: the
+  sender pushes a length-prefixed header + chunks, the receiver writes the
+  file and acks received-byte counts back on the same stream ('ACKD' +
+  uint32), rendered as a live "watch confirmed N%" bar; on close the
+  receiver renders/plays the media. Hardware-verified: video streamed to
+  the Pixel Watch 2 with 100% acked back, playing on both devices
+  simultaneously ("Stream on both").
+* Example drops image_picker in favor of file_picker.
+
 ## 1.2.1
 
 * Example: watch-adaptive layout for round Wear OS screens (screens with

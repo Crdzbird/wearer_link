@@ -4,8 +4,8 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:audioplayers/audioplayers.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
-import 'package:image_picker/image_picker.dart';
 import 'package:record/record.dart';
 import 'package:video_player/video_player.dart';
 import 'package:wearer_link/wearer_link.dart';
@@ -109,6 +109,10 @@ class _HomePageState extends State<HomePage> {
     // Echo every incoming stream back, uppercased.
     _subscriptions.add(
       _link.incomingStreams.listen((stream) {
+        if (stream.path == '/media') {
+          _receiveMediaStream(stream);
+          return;
+        }
         _append('stream in ${stream.path}');
         stream.data.listen(
           (chunk) {
@@ -260,13 +264,246 @@ class _HomePageState extends State<HomePage> {
 
   // -- media senders --------------------------------------------------------
 
-  Future<void> _sharePhoto() async {
-    final picked = await ImagePicker().pickImage(source: ImageSource.gallery);
+  static const _imageExt = {'jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp'};
+  static const _audioExt = {'m4a', 'mp3', 'aac', 'wav', 'ogg', 'flac'};
+  static const _videoExt = {'mp4', 'mov', 'webm', 'mkv', '3gp'};
+
+  static String _mediaKind(String path) {
+    final ext = path.split('.').last.toLowerCase();
+    if (_imageExt.contains(ext)) return 'image';
+    if (_audioExt.contains(ext)) return 'audio';
+    if (_videoExt.contains(ext)) return 'video';
+    return 'file';
+  }
+
+  static String _wirePath(String kind) => switch (kind) {
+    'image' => '/photo',
+    'audio' => '/audio',
+    'video' => '/video',
+    _ => '/demo-file',
+  };
+
+  /// One picker for image, video, audio, or any file, then a destination
+  /// choice: send (queued transfer), play here, live-stream to the watch,
+  /// or both — the live stream is bidirectional (the receiver acks progress
+  /// back over the same stream).
+  Future<void> _pickAndChoose() async {
+    final picked = await FilePicker.pickFile();
     if (picked == null) {
-      _append('photo: nothing picked');
+      _append('pick: nothing picked');
       return;
     }
-    await _trackedSend('/photo', picked.path, 'photo');
+    // SAF picks are content:// URIs — copy to a local file first.
+    final name = picked.name;
+    var path = picked.path;
+    if (path == null) {
+      final local = File('${Directory.systemTemp.path}/wearer_pick_$name');
+      final sink = local.openWrite();
+      await sink.addStream(picked.readAsByteStream());
+      await sink.close();
+      path = local.path;
+    }
+    final kind = _mediaKind(name);
+    if (!mounted) return;
+    final choice = await showDialog<String>(
+      context: context,
+      builder: (context) => SimpleDialog(
+        title: Text(
+          '$kind: $name',
+          maxLines: 2,
+          style: const TextStyle(fontSize: 14),
+        ),
+        children: [
+          for (final (id, label) in [
+            ('send', 'Send to watch (queued)'),
+            ('local', 'Play on this device'),
+            ('stream', 'Stream live to watch'),
+            ('both', 'Stream on both'),
+          ])
+            SimpleDialogOption(
+              onPressed: () => Navigator.pop(context, id),
+              child: Text(label),
+            ),
+        ],
+      ),
+    );
+    switch (choice) {
+      case 'send':
+        await _trackedSend(_wirePath(kind), path, kind);
+      case 'local':
+        await _renderLocal(kind, path);
+      case 'stream':
+        await _streamMedia(path, kind, name, localPlay: false);
+      case 'both':
+        await _renderLocal(kind, path);
+        await _streamMedia(path, kind, name, localPlay: true);
+      default:
+        _append('pick: cancelled');
+    }
+  }
+
+  /// Render/play [path] on this device according to [kind].
+  Future<void> _renderLocal(String kind, String path) async {
+    switch (kind) {
+      case 'image':
+        setState(() => _receivedImagePath = path);
+      case 'audio':
+        setState(() => _receivedAudioPath = path);
+        await _playAudio(path);
+      case 'video':
+        final controller = VideoPlayerController.file(File(path));
+        await controller.initialize();
+        await controller.setLooping(true);
+        await controller.play();
+        setState(() {
+          _video?.dispose();
+          _video = controller;
+        });
+      default:
+        _append('file ready: $path');
+    }
+  }
+
+  // ---- live media streaming over one bidirectional WearerStream ----
+  //
+  // Wire (demo-level, on path /media): 4-byte length-prefixed JSON header
+  // {k: kind, n: name, s: size}, then raw chunks. The RECEIVER talks back
+  // on the same stream with 8-byte acks: 'ACKD' + uint32(bytes received),
+  // which the sender renders as a live remote-progress bar.
+  static const _ackMagic = [0x41, 0x43, 0x4B, 0x44]; // 'ACKD'
+
+  double? _remoteProgress; // what the counterpart confirmed receiving
+
+  Future<void> _streamMedia(
+    String path,
+    String kind,
+    String name, {
+    required bool localPlay,
+  }) async {
+    final file = File(path);
+    final size = file.lengthSync();
+    final stream = await _link.openStream('/media');
+    _append('media stream open (${localPlay ? 'both' : 'to watch'})');
+    setState(() {
+      _transferProgress = 0;
+      _transferLabel = '$kind stream';
+      _remoteProgress = 0;
+    });
+    // Bidirectional: the counterpart acks received bytes on this stream.
+    final ackBuffer = BytesBuilder(copy: false);
+    stream.data.listen((chunk) {
+      ackBuffer.add(chunk);
+      final bytes = ackBuffer.toBytes();
+      final complete = bytes.length ~/ 8 * 8;
+      for (var i = 0; i + 8 <= complete; i += 8) {
+        if (bytes[i] == _ackMagic[0] && bytes[i + 1] == _ackMagic[1]) {
+          final received = ByteData.sublistView(
+            bytes,
+            i + 4,
+            i + 8,
+          ).getUint32(0);
+          setState(() => _remoteProgress = size == 0 ? 1 : received / size);
+        }
+      }
+      ackBuffer
+        ..clear()
+        ..add(Uint8List.sublistView(bytes, complete));
+    }, onError: (Object _) {});
+    try {
+      final header = Uint8List.fromList(
+        utf8.encode(jsonEncode({'k': kind, 'n': name, 's': size})),
+      );
+      final framed = Uint8List(4 + header.length)
+        ..buffer.asByteData().setUint32(0, header.length)
+        ..setRange(4, 4 + header.length, header);
+      await stream.send(framed);
+      var sent = 0;
+      await for (final chunk in file.openRead()) {
+        await stream.send(
+          chunk is Uint8List ? chunk : Uint8List.fromList(chunk),
+        );
+        sent += chunk.length;
+        setState(() => _transferProgress = size == 0 ? 1 : sent / size);
+      }
+      // Give the last acks a moment, then close tidily.
+      await Future<void>.delayed(const Duration(seconds: 2));
+      await stream.close();
+      _append(
+        '$kind streamed: ${size}B, watch confirmed '
+        '${((_remoteProgress ?? 0) * 100).toStringAsFixed(0)}%',
+      );
+    } catch (e) {
+      _append('media stream failed: $e');
+      unawaited(stream.close().catchError((_) {}));
+    } finally {
+      setState(() {
+        _transferProgress = null;
+        _transferLabel = null;
+        _remoteProgress = null;
+      });
+    }
+  }
+
+  /// Inbound /media stream: write chunks, ack progress back on the same
+  /// stream, render the media on a clean close.
+  void _receiveMediaStream(WearerStream stream) {
+    _append('media stream in');
+    String? kind;
+    IOSink? sink;
+    File? target;
+    var received = 0;
+    final headerBuffer = BytesBuilder(copy: false);
+    setState(() {
+      _transferProgress = null;
+      _transferLabel = null;
+    });
+    stream.data.listen(
+      (chunk) {
+        if (kind == null) {
+          headerBuffer.add(chunk);
+          final bytes = headerBuffer.toBytes();
+          if (bytes.length < 4) return;
+          final headerLength = ByteData.sublistView(bytes, 0, 4).getUint32(0);
+          if (bytes.length < 4 + headerLength) return;
+          final header =
+              jsonDecode(
+                    utf8.decode(
+                      Uint8List.sublistView(bytes, 4, 4 + headerLength),
+                    ),
+                  )
+                  as Map<String, Object?>;
+          kind = header['k'] as String? ?? 'file';
+          target = File(
+            '${Directory.systemTemp.path}/wearer_media_'
+            '${DateTime.now().microsecondsSinceEpoch}',
+          );
+          sink = target!.openWrite();
+          final rest = bytes.length - 4 - headerLength;
+          if (rest > 0) {
+            sink!.add(Uint8List.sublistView(bytes, 4 + headerLength));
+            received += rest;
+          }
+          headerBuffer.clear();
+          return;
+        }
+        sink?.add(chunk);
+        received += chunk.length;
+        // Bidirectional ack on the same stream: 'ACKD' + uint32 received.
+        final ack = Uint8List(8)
+          ..setRange(0, 4, _ackMagic)
+          ..buffer.asByteData().setUint32(4, received);
+        unawaited(stream.send(ack).catchError((_) {}));
+      },
+      onError: (Object e) => _append('media stream error: $e'),
+      onDone: () async {
+        await sink?.close();
+        final path = target?.path;
+        final receivedKind = kind;
+        if (path == null || receivedKind == null) return;
+        _append('media stream done: $receivedKind ${received}B');
+        await _renderLocal(receivedKind, path);
+      },
+    );
   }
 
   Future<void> _recordAndSendAudio() async {
@@ -286,15 +523,6 @@ class _HomePageState extends State<HomePage> {
       return;
     }
     await _trackedSend('/audio', recorded, 'audio clip');
-  }
-
-  Future<void> _sendVideo() async {
-    final picked = await ImagePicker().pickVideo(source: ImageSource.gallery);
-    if (picked == null) {
-      _append('video: nothing picked');
-      return;
-    }
-    await _trackedSend('/video', picked.path, 'video');
   }
 
   // -- UI -------------------------------------------------------------------
@@ -401,17 +629,13 @@ class _HomePageState extends State<HomePage> {
             OverflowBar(
               spacing: 8,
               children: [
-                FilledButton.tonal(
-                  onPressed: () => _run('photo', _sharePhoto),
-                  child: const Text('Share photo'),
+                FilledButton(
+                  onPressed: () => _run('pick', _pickAndChoose),
+                  child: const Text('Pick media'),
                 ),
                 FilledButton.tonal(
                   onPressed: () => _run('audio', _recordAndSendAudio),
                   child: const Text('Record 5s audio'),
-                ),
-                FilledButton.tonal(
-                  onPressed: () => _run('video', _sendVideo),
-                  child: const Text('Send video'),
                 ),
                 FilledButton(
                   onPressed: () => _run(
@@ -581,6 +805,18 @@ class _HomePageState extends State<HomePage> {
                     ),
                     const SizedBox(height: 4),
                     LinearProgressIndicator(value: _transferProgress),
+                    if (_remoteProgress != null) ...[
+                      const SizedBox(height: 6),
+                      Text(
+                        'watch confirmed '
+                        '${(_remoteProgress! * 100).toStringAsFixed(0)}%',
+                      ),
+                      const SizedBox(height: 4),
+                      LinearProgressIndicator(
+                        value: _remoteProgress,
+                        color: Colors.orange,
+                      ),
+                    ],
                   ],
                 ),
               ),
