@@ -304,7 +304,7 @@ zero cross-delivery on messages, data items and capability discovery.
   layer and must be re-planned before any code lands.
 - Effort: S (a device experiment, ~30 min). **Nothing else starts first.**
 
-### 9.1 Carry the identity
+### 9.1 Carry the identity ✅ shipped (2.2.0)
 
 A **link id** (developer-chosen, defaults to the package/bundle id) plus an
 optional **protocol version**.
@@ -337,7 +337,7 @@ await wearer.configureLink(id: 'com.acme.fitness', protocolVersion: 3);
 - Carried and exposed read-only; no behaviour change yet.
 - Effort: M.
 
-### 9.2 Enforce, and say so
+### 9.2 Enforce, and say so (next — runs after 9.3, which it keys off)
 
 - A non-matching event is dropped at the native boundary, counted in
   `getPersistentStats`, and never delivered silently.
@@ -345,7 +345,7 @@ await wearer.configureLink(id: 'com.acme.fitness', protocolVersion: 3);
   `WearerConnectionState.incompatible` so status reports it.
 - Effort: S–M.
 
-### 9.3 Handshake for free
+### 9.3 Handshake for free ✅ shipped (2.3.0)
 
 The built-in `/__wlstatus` responder already answers counterpart vitals
 without app code. Extend its reply with link id + protocol version, so

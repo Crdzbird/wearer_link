@@ -30,7 +30,7 @@ wearer.messages.listen((event) => handle(event));    // including events that
 >   wearer_link:
 >     git:
 >       url: https://github.com/Crdzbird/wearer_link
->       ref: v2.2.0
+>       ref: v2.3.0
 > ```
 
 ---
@@ -248,12 +248,29 @@ WearerLinkWatch.shared.protocolVersion = 3
 manifest/`Info.plist` declaration is in force from the very first launch —
 prefer it.
 
-**As of 2.2 identity is carried and reported, never enforced.** An
+Ask the other side who it is — over the built-in responder, so the
+counterpart needs no app code:
+
+```dart
+final peer = await wearer.getCounterpartIdentity();   // null = unlabelled
+if (peer != null && peer.protocolVersion < 3) {
+  // Older counterpart: negotiate down instead of mis-decoding.
+}
+```
+
+It rides the reply `getCounterpartVitals()` already makes, so checking
+identity costs no extra round trip — `vitals.identity` is the same value.
+The probe needs one clear target: pass `nodeId` when several watches are
+paired.
+
+**Identity is carried and reported, never enforced.** An
 unlabelled event (`e.linkId == null`) is normal from a pre-2.2 counterpart
 and is delivered like any other. Two transports cannot carry it yet:
 Android `MessageClient` messages/requests and Android file channels are
 `(path, bytes)` with no metadata room, so they arrive unlabelled even from a
-2.2 peer. Enforcement and that gap are M9.2 in [ROADMAP.md](ROADMAP.md).
+2.2 peer. Enforcement is M9.2 in [ROADMAP.md](ROADMAP.md); it will key off the
+handshake above, which works on every transport, rather than needing a label
+on each event.
 
 ### Messages & routing
 

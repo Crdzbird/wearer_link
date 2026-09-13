@@ -62,6 +62,14 @@ object WireProtocol {
   /** Built-in counterpart-vitals responder (request path). */
   const val STATUS_PATH = "/__wlstatus"
 
+  /**
+   * Identity fields in the status reply, which is a JSON dictionary — a
+   * pre-2.2 responder simply omits them and the asker reports "unlabelled".
+   * CONTRACT: mirrored on iOS/watchOS.
+   */
+  const val STATUS_KEY_LINK_ID = "linkId"
+  const val STATUS_KEY_PROTOCOL_VERSION = "protocolVersion"
+
   /** Reserved data path carrying launchCompanion route/args. */
   const val LAUNCH_PATH = "/__wllaunch"
 

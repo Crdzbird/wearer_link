@@ -503,6 +503,11 @@ public final class WearerLinkWatch: NSObject {
     /// Reserved plugin paths. CONTRACT: mirrored on iOS/Android.
     static let statusPath = "/__wlstatus"
     static let launchPath = "/__wllaunch"
+
+    /// Identity fields inside the status reply.
+    /// CONTRACT: mirrored on iOS/Android.
+    static let statusLinkId = "linkId"
+    static let statusProtocolVersion = "protocolVersion"
   }
 
   private func localStatusJson() -> Data {
@@ -514,6 +519,9 @@ public final class WearerLinkWatch: NSObject {
       "charging": charging,
       "model": device.model,
       "os": "watchOS \(device.systemVersion)",
+      // Additive: a pre-2.2 phone ignores these keys.
+      Envelope.statusLinkId: linkId,
+      Envelope.statusProtocolVersion: protocolVersion,
     ]
     return (try? JSONSerialization.data(withJSONObject: payload)) ?? Data()
   }

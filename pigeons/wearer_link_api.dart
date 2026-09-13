@@ -198,6 +198,14 @@ class CounterpartVitalsDto {
   String model;
 
   String osVersion;
+
+  /// Link id the counterpart declared in its status reply, or null when it
+  /// did not label itself — a pre-2.2 peer. Additive: the reply is a JSON
+  /// dictionary, so older responders simply omit these keys.
+  String? linkId;
+
+  /// Protocol version the counterpart declared, null when unlabelled.
+  int? protocolVersion;
 }
 
 /// Native, cross-restart delivery counters — the half of the story the

@@ -412,6 +412,7 @@ class WearerCounterpartVitals {
     required this.isCharging,
     required this.model,
     required this.osVersion,
+    this.identity,
   });
 
   /// Internal: maps the wire DTO.
@@ -422,6 +423,14 @@ class WearerCounterpartVitals {
         isCharging: dto.isCharging,
         model: dto.model,
         osVersion: dto.osVersion,
+        identity: dto.linkId == null
+            ? null
+            : WearerLinkIdentity(
+                linkId: dto.linkId!,
+                protocolVersion: dto.protocolVersion ?? 0,
+                // A peer that answers with an id has declared one.
+                isExplicit: true,
+              ),
       );
 
   /// 0–100, or -1 when the counterpart could not read it.
@@ -435,10 +444,15 @@ class WearerCounterpartVitals {
   /// OS name + version, e.g. `Android 14`, `watchOS 26.5`.
   final String osVersion;
 
+  /// Who the counterpart says it is, or null when it answered without a
+  /// label — a pre-2.2 peer. Reported only; nothing is rejected on it.
+  final WearerLinkIdentity? identity;
+
   @override
   String toString() =>
       'WearerCounterpartVitals($model $osVersion, $batteryPercent%'
-      '${isCharging ? ', charging' : ''})';
+      '${isCharging ? ', charging' : ''}'
+      '${identity == null ? '' : ', ${identity!.linkId}'})';
 }
 
 /// A companion-launch intent delivered to the launched app

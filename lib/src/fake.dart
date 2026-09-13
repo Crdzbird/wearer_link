@@ -710,6 +710,9 @@ class _FakeHost extends WearerLinkHostApi {
       isCharging: false,
       model: 'Fake ${target.platform.name}',
       osVersion: 'fake-1.0',
+      // Mirrors the native responder: an unlabelled endpoint omits these.
+      linkId: target.stampIdentity ? target.linkId : null,
+      protocolVersion: target.stampIdentity ? target.protocolVersion : null,
     );
   }
 

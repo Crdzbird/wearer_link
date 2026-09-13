@@ -1,3 +1,26 @@
+## 2.3.0
+
+**M9.3 — the identity handshake.** Ask the counterpart who it is before
+sending it anything. Enforcement is still M9.2.
+
+* `getCounterpartIdentity({nodeId})` returns the counterpart's
+  `WearerLinkIdentity`, or null when it answered without a label (a pre-2.2
+  peer). `WearerCounterpartVitals.identity` carries the same value, since it
+  rides the reply the vitals probe already makes — no extra round trip.
+* The built-in `/__wlstatus` responder now includes `linkId` and
+  `protocolVersion` on all three platforms. The reply is a JSON dictionary,
+  so this is purely additive: an older responder omits the keys and an older
+  asker ignores them.
+* `WearerLinkWatch` answers with its own `linkId`/`protocolVersion`, and
+  `requestPhoneVitals` surfaces the phone's.
+
+This closes the gap M9.1 left open. Identity could not be stamped on Android
+`MessageClient` messages, requests or file channels — there is nowhere in
+`(path, bytes)` to put it — so per-event labels are missing exactly there.
+A handshake is connection-level and works on every transport, which is why
+9.3 runs before 9.2: enforcement can key off the handshake rather than
+needing a label on each event.
+
 ## 2.2.0
 
 **M9.1 — link identity is carried and reported.** Nothing is rejected yet;

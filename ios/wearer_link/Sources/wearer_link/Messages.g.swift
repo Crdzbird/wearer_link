@@ -487,6 +487,12 @@ struct CounterpartVitalsDto: Hashable {
   var isCharging: Bool
   var model: String
   var osVersion: String
+  /// Link id the counterpart declared in its status reply, or null when it
+  /// did not label itself — a pre-2.2 peer. Additive: the reply is a JSON
+  /// dictionary, so older responders simply omit these keys.
+  var linkId: String? = nil
+  /// Protocol version the counterpart declared, null when unlabelled.
+  var protocolVersion: Int64? = nil
 
 
   // swift-format-ignore: AlwaysUseLowerCamelCase
@@ -495,12 +501,16 @@ struct CounterpartVitalsDto: Hashable {
     let isCharging = pigeonVar_list[1] as! Bool
     let model = pigeonVar_list[2] as! String
     let osVersion = pigeonVar_list[3] as! String
+    let linkId: String? = nilOrValue(pigeonVar_list[4])
+    let protocolVersion: Int64? = nilOrValue(pigeonVar_list[5])
 
     return CounterpartVitalsDto(
       batteryPercent: batteryPercent,
       isCharging: isCharging,
       model: model,
-      osVersion: osVersion
+      osVersion: osVersion,
+      linkId: linkId,
+      protocolVersion: protocolVersion
     )
   }
   func toList() -> [Any?] {
@@ -509,13 +519,15 @@ struct CounterpartVitalsDto: Hashable {
       isCharging,
       model,
       osVersion,
+      linkId,
+      protocolVersion,
     ]
   }
   static func == (lhs: CounterpartVitalsDto, rhs: CounterpartVitalsDto) -> Bool {
     if Swift.type(of: lhs) != Swift.type(of: rhs) {
       return false
     }
-    return deepEqualsMessages(lhs.batteryPercent, rhs.batteryPercent) && deepEqualsMessages(lhs.isCharging, rhs.isCharging) && deepEqualsMessages(lhs.model, rhs.model) && deepEqualsMessages(lhs.osVersion, rhs.osVersion)
+    return deepEqualsMessages(lhs.batteryPercent, rhs.batteryPercent) && deepEqualsMessages(lhs.isCharging, rhs.isCharging) && deepEqualsMessages(lhs.model, rhs.model) && deepEqualsMessages(lhs.osVersion, rhs.osVersion) && deepEqualsMessages(lhs.linkId, rhs.linkId) && deepEqualsMessages(lhs.protocolVersion, rhs.protocolVersion)
   }
 
   func hash(into hasher: inout Hasher) {
@@ -524,6 +536,8 @@ struct CounterpartVitalsDto: Hashable {
     deepHashMessages(value: isCharging, hasher: &hasher)
     deepHashMessages(value: model, hasher: &hasher)
     deepHashMessages(value: osVersion, hasher: &hasher)
+    deepHashMessages(value: linkId, hasher: &hasher)
+    deepHashMessages(value: protocolVersion, hasher: &hasher)
   }
 }
 

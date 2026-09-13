@@ -535,7 +535,15 @@ data class CounterpartVitalsDto (
   val batteryPercent: Long,
   val isCharging: Boolean,
   val model: String,
-  val osVersion: String
+  val osVersion: String,
+  /**
+   * Link id the counterpart declared in its status reply, or null when it
+   * did not label itself — a pre-2.2 peer. Additive: the reply is a JSON
+   * dictionary, so older responders simply omit these keys.
+   */
+  val linkId: String? = null,
+  /** Protocol version the counterpart declared, null when unlabelled. */
+  val protocolVersion: Long? = null
 )
  {
   companion object {
@@ -544,7 +552,9 @@ data class CounterpartVitalsDto (
       val isCharging = pigeonVar_list[1] as Boolean
       val model = pigeonVar_list[2] as String
       val osVersion = pigeonVar_list[3] as String
-      return CounterpartVitalsDto(batteryPercent, isCharging, model, osVersion)
+      val linkId = pigeonVar_list[4] as String?
+      val protocolVersion = pigeonVar_list[5] as Long?
+      return CounterpartVitalsDto(batteryPercent, isCharging, model, osVersion, linkId, protocolVersion)
     }
   }
   fun toList(): List<Any?> {
@@ -553,6 +563,8 @@ data class CounterpartVitalsDto (
       isCharging,
       model,
       osVersion,
+      linkId,
+      protocolVersion,
     )
   }
   override fun equals(other: Any?): Boolean {
@@ -563,7 +575,7 @@ data class CounterpartVitalsDto (
       return true
     }
     val other = other as CounterpartVitalsDto
-    return MessagesPigeonUtils.deepEquals(this.batteryPercent, other.batteryPercent) && MessagesPigeonUtils.deepEquals(this.isCharging, other.isCharging) && MessagesPigeonUtils.deepEquals(this.model, other.model) && MessagesPigeonUtils.deepEquals(this.osVersion, other.osVersion)
+    return MessagesPigeonUtils.deepEquals(this.batteryPercent, other.batteryPercent) && MessagesPigeonUtils.deepEquals(this.isCharging, other.isCharging) && MessagesPigeonUtils.deepEquals(this.model, other.model) && MessagesPigeonUtils.deepEquals(this.osVersion, other.osVersion) && MessagesPigeonUtils.deepEquals(this.linkId, other.linkId) && MessagesPigeonUtils.deepEquals(this.protocolVersion, other.protocolVersion)
   }
 
   override fun hashCode(): Int {
@@ -572,6 +584,8 @@ data class CounterpartVitalsDto (
     result = 31 * result + MessagesPigeonUtils.deepHash(this.isCharging)
     result = 31 * result + MessagesPigeonUtils.deepHash(this.model)
     result = 31 * result + MessagesPigeonUtils.deepHash(this.osVersion)
+    result = 31 * result + MessagesPigeonUtils.deepHash(this.linkId)
+    result = 31 * result + MessagesPigeonUtils.deepHash(this.protocolVersion)
     return result
   }
 }

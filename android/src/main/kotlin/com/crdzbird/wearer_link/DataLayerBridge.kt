@@ -429,6 +429,15 @@ class DataLayerBridge(private val context: Context) {
         isCharging = json.optBoolean("charging", false),
         model = json.optString("model", "unknown"),
         osVersion = json.optString("os", "unknown"),
+        // Absent from a pre-2.2 responder: reported as unlabelled.
+        linkId = json.optString(WireProtocol.STATUS_KEY_LINK_ID, "")
+          .ifEmpty { null },
+        protocolVersion =
+          if (json.has(WireProtocol.STATUS_KEY_PROTOCOL_VERSION)) {
+            json.optLong(WireProtocol.STATUS_KEY_PROTOCOL_VERSION)
+          } else {
+            null
+          },
       )
     } catch (e: Exception) {
       throw FlutterError("unknown", "Malformed status reply: $e", null)

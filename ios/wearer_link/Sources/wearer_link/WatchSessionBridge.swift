@@ -32,6 +32,12 @@ enum Envelope {
   /// Reserved data path carrying launchCompanion route/args.
   static let launchPath = "/__wllaunch"
 
+  /// Identity fields inside the status reply, which is a JSON dictionary —
+  /// a pre-2.2 responder omits them and the asker reports "unlabelled".
+  /// CONTRACT: mirrored on Android/watchOS.
+  static let statusLinkId = "linkId"
+  static let statusProtocolVersion = "protocolVersion"
+
   /// Oversized transferData payloads travel as files whose path carries
   /// this marker; the receiver restores them into plain data events.
   /// CONTRACT: mirrored on Android/watchOS.
@@ -266,7 +272,11 @@ final class WatchSessionBridge: NSObject {
             batteryPercent: Int64(json["battery"] as? Int ?? -1),
             isCharging: json["charging"] as? Bool ?? false,
             model: json["model"] as? String ?? "unknown",
-            osVersion: json["os"] as? String ?? "unknown")))
+            osVersion: json["os"] as? String ?? "unknown",
+            // Absent from a pre-2.2 responder: reported as unlabelled.
+            linkId: json[Envelope.statusLinkId] as? String,
+            protocolVersion: (json[Envelope.statusProtocolVersion] as? NSNumber)?
+              .int64Value)))
         }
       },
       errorHandler: { error in
@@ -278,6 +288,7 @@ final class WatchSessionBridge: NSObject {
 
   /// This device's vitals, serving inbound /__wlstatus probes.
   func localStatusJson() -> Data {
+    let identity = LinkIdentity.resolve()
     let device = UIDevice.current
     let level = device.batteryLevel
     let charging = device.batteryState == .charging || device.batteryState == .full
@@ -286,6 +297,9 @@ final class WatchSessionBridge: NSObject {
       "charging": charging,
       "model": device.model,
       "os": "iOS \(device.systemVersion)",
+      // Additive: a pre-2.2 asker ignores these keys.
+      Envelope.statusLinkId: identity.linkId,
+      Envelope.statusProtocolVersion: identity.protocolVersion,
     ]
     return (try? JSONSerialization.data(withJSONObject: payload)) ?? Data()
   }

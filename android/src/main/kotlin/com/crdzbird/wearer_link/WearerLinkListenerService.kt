@@ -200,6 +200,7 @@ class WearerLinkListenerService : WearableListenerService() {
   }
 
   private fun statusJson(): ByteArray {
+    val identity = LinkIdentity.resolve(this)
     val battery = getSystemService(BATTERY_SERVICE) as android.os.BatteryManager
     val percent =
       battery.getIntProperty(android.os.BatteryManager.BATTERY_PROPERTY_CAPACITY)
@@ -214,6 +215,9 @@ class WearerLinkListenerService : WearableListenerService() {
         },
       )
       .put("os", "Android ${android.os.Build.VERSION.RELEASE}")
+      // Additive: a pre-2.2 asker ignores these keys.
+      .put(WireProtocol.STATUS_KEY_LINK_ID, identity.linkId)
+      .put(WireProtocol.STATUS_KEY_PROTOCOL_VERSION, identity.protocolVersion)
       .toString()
       .toByteArray(Charsets.UTF_8)
   }

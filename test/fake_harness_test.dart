@@ -929,6 +929,77 @@ void persistentStatsTests() {
       expect(utf8.decode(reply), 'pong');
     });
   });
+  group('identity handshake (M9.3)', () {
+    test('the counterpart answers with who it is', () async {
+      final (phone, watch) = WearerLinkFake.pair();
+      watch.setLinkIdentity(linkId: 'com.acme.fitness.watch', protocolVersion: 3);
+
+      final peer = await phone.getCounterpartIdentity();
+      expect(peer, isNotNull);
+      expect(peer!.linkId, 'com.acme.fitness.watch');
+      expect(peer.protocolVersion, 3);
+      expect(peer.isExplicit, isTrue);
+    });
+
+    test('identity rides the same reply as the vitals', () async {
+      final (phone, watch) = WearerLinkFake.pair();
+      watch.setLinkIdentity(linkId: 'com.acme.watch', protocolVersion: 2);
+
+      final vitals = await phone.getCounterpartVitals();
+      expect(vitals.model, contains('Fake'));
+      expect(vitals.identity?.linkId, 'com.acme.watch');
+      expect(vitals.toString(), contains('com.acme.watch'));
+    });
+
+    test('a pre-2.2 counterpart answers unlabelled, not with an error',
+        () async {
+      final (phone, watch) = WearerLinkFake.pair();
+      watch.sendUnlabelled();
+
+      final vitals = await phone.getCounterpartVitals();
+      // The vitals still work — only the identity is missing.
+      expect(vitals.batteryPercent, 80);
+      expect(vitals.identity, isNull);
+      expect(await phone.getCounterpartIdentity(), isNull);
+    });
+
+    test('each side sees the other, not itself', () async {
+      final (phone, watch) = WearerLinkFake.pair();
+      phone.setLinkIdentity(linkId: 'com.acme.phone');
+      watch.setLinkIdentity(linkId: 'com.acme.watch');
+
+      expect((await phone.getCounterpartIdentity())!.linkId, 'com.acme.watch');
+      expect((await watch.getCounterpartIdentity())!.linkId, 'com.acme.phone');
+    });
+
+    test('a mismatch is visible before anything is sent', () async {
+      final (phone, watch) = WearerLinkFake.pair();
+      phone.setLinkIdentity(linkId: 'com.acme.staging', protocolVersion: 3);
+      watch.setLinkIdentity(linkId: 'com.acme.prod', protocolVersion: 1);
+
+      final me = await phone.getLinkIdentity();
+      final peer = await phone.getCounterpartIdentity();
+      // This is the whole point of M9.3: the app can decide before sending.
+      expect(peer!.linkId, isNot(me.linkId));
+      expect(peer.protocolVersion, lessThan(me.protocolVersion));
+    });
+
+    test('probing needs one clear target on a multi-watch network', () async {
+      final [phone, _, _] = WearerLinkFake.network([
+        WearerFakePlatform.androidPhone,
+        WearerFakePlatform.wearOs,
+        WearerFakePlatform.wearOs,
+      ]);
+      await expectLater(
+        phone.getCounterpartIdentity(),
+        throwsA(isA<WearerLinkException>()
+            .having((e) => e.message, 'message', contains('pass nodeId'))),
+      );
+      final peer = await phone.getCounterpartIdentity(nodeId: 'node-c');
+      expect(peer!.linkId, 'node-c');
+    });
+  });
+
   group('link identity (M9.1: carried, not enforced)', () {
     test('defaults to the endpoint identity and is reported as such',
         () async {

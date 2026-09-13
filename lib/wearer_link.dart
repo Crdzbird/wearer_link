@@ -689,9 +689,30 @@ class WearerLink {
         ],
       );
 
+  /// Ask the counterpart who it is, over the built-in `/__wlstatus`
+  /// responder — no app code needed on the other side.
+  ///
+  /// Returns null when the counterpart answered without a label, which is
+  /// what a pre-2.2 peer does. Use it to check compatibility before sending:
+  ///
+  /// ```dart
+  /// final peer = await wearer.getCounterpartIdentity();
+  /// if (peer != null && peer.protocolVersion < 3) {
+  ///   // Older counterpart: negotiate down instead of mis-decoding.
+  /// }
+  /// ```
+  ///
+  /// Requires a reachable counterpart, and exactly one when several are
+  /// paired — pass [nodeId] to pick.
+  Future<WearerLinkIdentity?> getCounterpartIdentity({String? nodeId}) async =>
+      (await getCounterpartVitals(nodeId: nodeId)).identity;
+
   /// The counterpart device's vitals (battery, model, OS), answered by a
   /// built-in responder on the other side — no app code needed there.
   /// Requires a reachable counterpart running wearer_link >= 0.5.
+  ///
+  /// From 2.2 the reply also carries the counterpart's
+  /// [WearerCounterpartVitals.identity] when it is running 2.2 or later.
   Future<WearerCounterpartVitals> getCounterpartVitals({String? nodeId}) =>
       _guard(
         () async => WearerCounterpartVitals.fromDto(

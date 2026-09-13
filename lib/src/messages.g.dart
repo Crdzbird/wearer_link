@@ -446,6 +446,8 @@ class CounterpartVitalsDto {
     required this.isCharging,
     required this.model,
     required this.osVersion,
+    this.linkId,
+    this.protocolVersion,
   });
 
   /// 0–100, or -1 when the counterpart could not read it.
@@ -457,12 +459,22 @@ class CounterpartVitalsDto {
 
   String osVersion;
 
+  /// Link id the counterpart declared in its status reply, or null when it
+  /// did not label itself — a pre-2.2 peer. Additive: the reply is a JSON
+  /// dictionary, so older responders simply omit these keys.
+  String? linkId;
+
+  /// Protocol version the counterpart declared, null when unlabelled.
+  int? protocolVersion;
+
   List<Object?> _toList() {
     return <Object?>[
       batteryPercent,
       isCharging,
       model,
       osVersion,
+      linkId,
+      protocolVersion,
     ];
   }
 
@@ -476,6 +488,8 @@ class CounterpartVitalsDto {
       isCharging: result[1]! as bool,
       model: result[2]! as String,
       osVersion: result[3]! as String,
+      linkId: result[4] as String?,
+      protocolVersion: result[5] as int?,
     );
   }
 
@@ -488,7 +502,7 @@ class CounterpartVitalsDto {
     if (identical(this, other)) {
       return true;
     }
-    return _deepEquals(batteryPercent, other.batteryPercent) && _deepEquals(isCharging, other.isCharging) && _deepEquals(model, other.model) && _deepEquals(osVersion, other.osVersion);
+    return _deepEquals(batteryPercent, other.batteryPercent) && _deepEquals(isCharging, other.isCharging) && _deepEquals(model, other.model) && _deepEquals(osVersion, other.osVersion) && _deepEquals(linkId, other.linkId) && _deepEquals(protocolVersion, other.protocolVersion);
   }
 
   @override
