@@ -30,7 +30,7 @@ wearer.messages.listen((event) => handle(event));    // including events that
 >   wearer_link:
 >     git:
 >       url: https://github.com/Crdzbird/wearer_link
->       ref: v2.3.0
+>       ref: v2.4.0
 > ```
 
 ---
@@ -263,14 +263,32 @@ identity costs no extra round trip — `vitals.identity` is the same value.
 The probe needs one clear target: pass `nodeId` when several watches are
 paired.
 
-**Identity is carried and reported, never enforced.** An
+**A mismatch is refused, both ways.** An event whose sender declares a
+different link id is dropped natively before reaching your code and counted
+in `getPersistentStats().rejectedMismatch`; a send to a counterpart known to
+be a foreign build fails with `WearerErrorCode.linkMismatch`, and
+`getCompanionStatus()` reports `incompatible`.
+
+**Lenient by default.** An
 unlabelled event (`e.linkId == null`) is normal from a pre-2.2 counterpart
 and is delivered like any other. Two transports cannot carry it yet:
 Android `MessageClient` messages/requests and Android file channels are
 `(path, bytes)` with no metadata room, so they arrive unlabelled even from a
-2.2 peer. Enforcement is M9.2 in [ROADMAP.md](ROADMAP.md); it will key off the
-handshake above, which works on every transport, rather than needing a label
-on each event.
+2.2 peer. Only a *known* mismatch is refused: an unlabelled peer (anything pre-2.2)
+keeps working, and a node that has never handshaked may still be sent to.
+That is why the two unlabelled transports above are not a hole — the
+handshake covers them, since identity learned from it is remembered per node.
+
+Opt into verified-or-nothing once every counterpart is 2.2+:
+
+```dart
+await wearer.setStrictLinkIdentity(true);
+// Now unlabelled and not-yet-handshaked peers are refused in both
+// directions — call getCounterpartIdentity() before sending.
+```
+
+The policy is persisted natively, so the dead-app receive path enforces the
+same thing.
 
 ### Messages & routing
 

@@ -112,7 +112,11 @@ class WearerLinkFake extends WearerLink {
   void setReachable(bool reachable) => _fakeHost.wire.setReachable(reachable);
 
   /// Identity this endpoint stamps on what it sends, mirroring the native
-  /// manifest/Info.plist resolution. Defaults to the node id.
+  /// manifest/Info.plist resolution.
+  ///
+  /// Every endpoint starts on the same id, as a phone app and its watch app
+  /// share a package/bundle id. Give one endpoint a different id to model a
+  /// foreign build — which M9.2 then refuses.
   ///
   /// ```dart
   /// phone.setLinkIdentity(linkId: 'com.acme.fitness', protocolVersion: 3);
@@ -227,6 +231,16 @@ class _FakeWire {
   /// Nodes that stay reachable but reject interactive sends.
   final sendFailures = <String, ({String code, String message})>{};
 
+  /// Identity every endpoint starts with, standing in for the package name
+  /// or bundle identifier a phone app and its watch app share. Endpoints
+  /// only differ once a test sets one explicitly.
+  static const defaultLinkId = 'com.example.fake';
+
+  /// Strict link identity, shared by the endpoints as the native policy is
+  /// per-app (each endpoint reads its own persisted flag; the fake keeps one
+  /// switch because tests set it on the endpoint they are exercising).
+  final strictNodes = <String>{};
+
   List<_FakeHost> others(_FakeHost self) =>
       hosts.where((h) => !identical(h, self)).toList();
 
@@ -257,14 +271,15 @@ class _FakeWire {
 }
 
 class _FakeHost extends WearerLinkHostApi {
-  _FakeHost(this.wire, this.nodeId, this.platform) : linkId = nodeId;
+  _FakeHost(this.wire, this.nodeId, this.platform)
+      : linkId = _FakeWire.defaultLinkId;
 
   final _FakeWire wire;
   final String nodeId;
   final WearerFakePlatform platform;
 
-  /// Identity this endpoint stamps on what it sends. Defaults to the node
-  /// id, standing in for the package name / bundle identifier.
+  /// Identity this endpoint stamps on what it sends. Defaults to the
+  /// network-wide id, as a phone app and its watch app share one.
   String linkId;
   int protocolVersion = 0;
   bool identityIsExplicit = false;
@@ -272,6 +287,15 @@ class _FakeHost extends WearerLinkHostApi {
   /// When false the endpoint sends unlabelled, standing in for a pre-2.2
   /// counterpart so the lenient path stays testable.
   bool stampIdentity = true;
+
+  /// What each counterpart node last declared — the native LinkGuard
+  /// registry, learned from handshakes and labelled events.
+  final knownPeers = <String, ({String linkId, int protocolVersion})>{};
+
+  /// Events refused because the sender declared a different link id.
+  int rejectedMismatch = 0;
+
+  bool get strict => wire.strictNodes.contains(nodeId);
 
   /// The currently-attached facade; null while "the app is killed".
   WearerLinkFake? link;
@@ -348,10 +372,56 @@ class _FakeHost extends WearerLinkHostApi {
 
   // -- inbound delivery -----------------------------------------------------
 
+  /// Whether an inbound event belongs to this app's link.
+  ///
+  /// CONTRACT: mirrors LinkGuard.accepts on both native sides — lenient
+  /// refuses only a known mismatch, strict requires a positive match.
+  bool _admits(WearerEventDto dto) {
+    final theirs = dto.linkId ?? knownPeers[dto.sourceNodeId]?.linkId;
+    if (theirs == null) return !strict;
+    return theirs == linkId;
+  }
+
+  /// Applies the gate, learning from a labelled event on the way through.
+  bool _admit(WearerEventDto dto) {
+    if (!_admits(dto)) {
+      rejectedMismatch++;
+      return false;
+    }
+    final theirs = dto.linkId;
+    if (theirs != null) {
+      knownPeers[dto.sourceNodeId] =
+          (linkId: theirs, protocolVersion: dto.protocolVersion ?? 0);
+    }
+    return true;
+  }
+
+  /// Guards an outbound interactive send to [targetNodeId].
+  void _requireCompatible(String targetNodeId) {
+    final peer = knownPeers[targetNodeId];
+    if (peer == null) {
+      if (!strict) return;
+      throw PlatformException(
+        code: 'linkMismatch',
+        message: 'Strict link identity: $targetNodeId has not proved its '
+            'identity yet — call getCounterpartIdentity() first.',
+      );
+    }
+    if (peer.linkId != linkId) {
+      throw PlatformException(
+        code: 'linkMismatch',
+        message: "Counterpart $targetNodeId declares link id "
+            "'${peer.linkId}', this app is '$linkId'.",
+      );
+    }
+  }
+
   /// Deliver [dto] into this endpoint through the same decision tree the
   /// native listener services use: gate -> live -> background -> queue.
   void receive(WearerEventDto dto) {
     receivedTotal++;
+    // M9.2: refuse foreign traffic before it reaches any app code.
+    if (!_admit(dto)) return;
     if (!deliveryEnabled) {
       queuedWhileDead++;
       pendingQueue.add(_asDead(dto));
@@ -411,11 +481,19 @@ class _FakeHost extends WearerLinkHostApi {
 
   CompanionStatusDto _status() {
     final reachable = reachableOthers;
+    final ids = reachable.map((h) => h.nodeId).toList();
+    final allMismatch = ids.isNotEmpty &&
+        ids.every((id) {
+          final peer = knownPeers[id];
+          return peer != null && peer.linkId != linkId;
+        });
     return CompanionStatusDto(
-      state: reachable.isEmpty
-          ? ConnectionStateDto.unreachable
-          : ConnectionStateDto.reachable,
-      nodes: reachable.map((h) => h.nodeId).toList(),
+      state: switch ((ids.isEmpty, allMismatch)) {
+        (true, _) => ConnectionStateDto.unreachable,
+        (false, true) => ConnectionStateDto.incompatible,
+        (false, false) => ConnectionStateDto.reachable,
+      },
+      nodes: ids,
     );
   }
 
@@ -483,7 +561,18 @@ class _FakeHost extends WearerLinkHostApi {
         linkId: linkId,
         protocolVersion: protocolVersion,
         isExplicit: identityIsExplicit,
+        strict: strict,
       );
+
+  @override
+  Future<LinkIdentityDto> setStrictLinkIdentity(bool strict) async {
+    if (strict) {
+      wire.strictNodes.add(nodeId);
+    } else {
+      wire.strictNodes.remove(nodeId);
+    }
+    return getLinkIdentity();
+  }
 
   @override
   Future<LinkIdentityDto> configureLink(
@@ -514,6 +603,18 @@ class _FakeHost extends WearerLinkHostApi {
     final delivered = <String>[];
     final failures = <NodeFailureDto>[];
     for (final target in targets) {
+      try {
+        _requireCompatible(target.nodeId);
+      } on PlatformException catch (e) {
+        failures.add(
+          NodeFailureDto(
+            nodeId: target.nodeId,
+            code: e.code,
+            message: e.message ?? '',
+          ),
+        );
+        continue;
+      }
       final failure = wire.sendFailures[target.nodeId];
       if (failure != null) {
         failures.add(
@@ -531,10 +632,13 @@ class _FakeHost extends WearerLinkHostApi {
       delivered.add(target.nodeId);
     }
     if (delivered.isEmpty) {
+      // Mirrors DataLayerBridge: a uniform failure keeps its own code, so a
+      // lone foreign build reports linkMismatch rather than sendFailed.
+      final codes = failures.map((f) => f.code).toSet();
       throw PlatformException(
-        code: 'sendFailed',
+        code: codes.length == 1 ? codes.single : 'sendFailed',
         message: 'sendMessage reached no node: '
-            '${failures.map((f) => f.nodeId).join(', ')}',
+            '${failures.map((f) => '${f.nodeId} (${f.message})').join(', ')}',
       );
     }
     return SendReportDto(delivered: delivered, failures: failures);
@@ -547,6 +651,7 @@ class _FakeHost extends WearerLinkHostApi {
     String? nodeId,
   ) async {
     final counterpart = _singleTarget(nodeId);
+    _requireCompatible(counterpart.nodeId);
     if (!counterpart.deliveryEnabled) {
       throw PlatformException(
         code: 'sendFailed',
@@ -604,6 +709,7 @@ class _FakeHost extends WearerLinkHostApi {
         queuedWhileDead: queuedWhileDead,
         drained: drainedTotal,
         backgroundHandled: backgroundHandledTotal,
+        rejectedMismatch: rejectedMismatch,
         sinceMillis: statsSince.millisecondsSinceEpoch,
       );
 
@@ -705,6 +811,11 @@ class _FakeHost extends WearerLinkHostApi {
   Future<CounterpartVitalsDto> getCounterpartVitals(String? nodeId) async {
     // Served by a request on the other side, so it needs one clear target.
     final target = _singleTarget(nodeId);
+    if (target.stampIdentity) {
+      // M9.3 handshake feeds M9.2.
+      knownPeers[target.nodeId] =
+          (linkId: target.linkId, protocolVersion: target.protocolVersion);
+    }
     return CounterpartVitalsDto(
       batteryPercent: 80,
       isCharging: false,

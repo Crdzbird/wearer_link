@@ -337,7 +337,7 @@ await wearer.configureLink(id: 'com.acme.fitness', protocolVersion: 3);
 - Carried and exposed read-only; no behaviour change yet.
 - Effort: M.
 
-### 9.2 Enforce, and say so (next — runs after 9.3, which it keys off)
+### 9.2 Enforce, and say so ✅ shipped (2.4.0)
 
 - A non-matching event is dropped at the native boundary, counted in
   `getPersistentStats`, and never delivered silently.

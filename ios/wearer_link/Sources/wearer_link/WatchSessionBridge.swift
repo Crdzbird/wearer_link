@@ -110,12 +110,23 @@ final class WatchSessionBridge: NSObject {
     guard session.isReachable else {
       return CompanionStatusDto(state: .unreachable, nodes: [])
     }
+    // Reachable but a known foreign build: say so rather than letting
+    // sends fail one by one.
+    if LinkGuard.isKnownMismatch(nodeId: Self.nodeId) {
+      return CompanionStatusDto(state: .incompatible, nodes: [Self.nodeId])
+    }
     return CompanionStatusDto(state: .reachable, nodes: [Self.nodeId])
   }
 
   // MARK: - Outbound
 
   func sendMessage(path: String, payload: Data, completion: @escaping (Error?) -> Void) {
+    do {
+      try LinkGuard.requireCompatible(nodeId: Self.nodeId)
+    } catch {
+      completion(error)
+      return
+    }
     let session = WCSession.default
     guard session.activationState == .activated, session.isReachable else {
       completion(PigeonError(
@@ -268,6 +279,14 @@ final class WatchSessionBridge: NSObject {
               details: nil)))
             return
           }
+          // M9.3 handshake feeds M9.2: remember who the watch says it is.
+          if let peerId = json[Envelope.statusLinkId] as? String {
+            LinkGuard.remember(
+              nodeId: Self.nodeId,
+              linkId: peerId,
+              protocolVersion: (json[Envelope.statusProtocolVersion] as? NSNumber)?
+                .int64Value ?? 0)
+          }
           completion(.success(CounterpartVitalsDto(
             batteryPercent: Int64(json["battery"] as? Int ?? -1),
             isCharging: json["charging"] as? Bool ?? false,
@@ -384,6 +403,9 @@ final class WatchSessionBridge: NSObject {
     )
     DispatchQueue.main.async {
       StatsStore.shared.increment(StatsStore.keyReceived)
+      // M9.2: refuse traffic belonging to a different app build before it
+      // reaches any app code. Learns the peer's identity on the way through.
+      guard LinkGuard.admit(event.toDto(deliveredWhileDead: false)) else { return }
       if !self.deliveryEnabled {
         // Delivery paused: divert to the queue, wake nothing.
         StatsStore.shared.increment(StatsStore.keyQueued)

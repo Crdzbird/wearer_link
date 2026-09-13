@@ -118,6 +118,14 @@ extension WearerLinkPlugin: WearerLinkHostApi {
       LinkIdentity.configure(linkId: linkId, protocolVersion: protocolVersion)))
   }
 
+  func setStrictLinkIdentity(
+    strict: Bool,
+    completion: @escaping (Result<LinkIdentityDto, Error>) -> Void
+  ) {
+    LinkGuard.setStrict(strict)
+    completion(.success(LinkIdentity.resolve()))
+  }
+
   func sendMessage(
     path: String,
     payload: FlutterStandardTypedData,

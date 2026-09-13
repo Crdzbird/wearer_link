@@ -36,6 +36,10 @@ enum ConnectionStateDto {
 
   /// Counterpart is reachable for interactive messages.
   reachable,
+
+  /// Reachable, but every counterpart is known to declare a different link
+  /// id — talking to it would cross builds or protocol versions.
+  incompatible,
 }
 
 /// Snapshot of the companion relationship.
@@ -231,6 +235,10 @@ class PersistentStatsDto {
   /// Events acked by the headless background isolate.
   int backgroundHandled;
 
+  /// Events dropped at the native boundary because the sender's link
+  /// identity did not match this app's (M9.2).
+  int rejectedMismatch;
+
   /// When these counters started (epoch ms; reset on
   /// [WearerLinkHostApi.resetPersistentStats]).
   int sinceMillis;
@@ -287,6 +295,11 @@ class LinkIdentityDto {
   /// True when declared through manifest meta-data, Info.plist or
   /// configureLink, rather than defaulted from the package/bundle id.
   bool isExplicit;
+
+  /// When true a counterpart must positively prove a matching identity;
+  /// unlabelled and not-yet-known peers are refused. Default false
+  /// (lenient): only a known mismatch is refused.
+  bool strict;
 }
 
 /// Dart -> native.
@@ -306,6 +319,11 @@ abstract class WearerLinkHostApi {
   /// the same values. Null leaves that field at its resolved default.
   @async
   LinkIdentityDto configureLink(String? linkId, int? protocolVersion);
+
+  /// Choose how unverified counterparts are treated. Persisted natively so
+  /// the dead-app receive path enforces the same policy.
+  @async
+  LinkIdentityDto setStrictLinkIdentity(bool strict);
 
   @async
   CompanionStatusDto getCompanionStatus();

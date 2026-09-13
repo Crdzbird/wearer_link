@@ -206,7 +206,12 @@ enum class ConnectionStateDto(val raw: Int) {
   /** Paired and installed, but not currently reachable (e.g. Bluetooth off). */
   UNREACHABLE(3),
   /** Counterpart is reachable for interactive messages. */
-  REACHABLE(4);
+  REACHABLE(4),
+  /**
+   * Reachable, but every counterpart is known to declare a different link
+   * id — talking to it would cross builds or protocol versions.
+   */
+  INCOMPATIBLE(5);
 
   companion object {
     fun ofRaw(raw: Int): ConnectionStateDto? {
@@ -606,6 +611,11 @@ data class PersistentStatsDto (
   /** Events acked by the headless background isolate. */
   val backgroundHandled: Long,
   /**
+   * Events dropped at the native boundary because the sender's link
+   * identity did not match this app's (M9.2).
+   */
+  val rejectedMismatch: Long,
+  /**
    * When these counters started (epoch ms; reset on
    * [WearerLinkHostApi.resetPersistentStats]).
    */
@@ -618,8 +628,9 @@ data class PersistentStatsDto (
       val queuedWhileDead = pigeonVar_list[1] as Long
       val drained = pigeonVar_list[2] as Long
       val backgroundHandled = pigeonVar_list[3] as Long
-      val sinceMillis = pigeonVar_list[4] as Long
-      return PersistentStatsDto(receivedTotal, queuedWhileDead, drained, backgroundHandled, sinceMillis)
+      val rejectedMismatch = pigeonVar_list[4] as Long
+      val sinceMillis = pigeonVar_list[5] as Long
+      return PersistentStatsDto(receivedTotal, queuedWhileDead, drained, backgroundHandled, rejectedMismatch, sinceMillis)
     }
   }
   fun toList(): List<Any?> {
@@ -628,6 +639,7 @@ data class PersistentStatsDto (
       queuedWhileDead,
       drained,
       backgroundHandled,
+      rejectedMismatch,
       sinceMillis,
     )
   }
@@ -639,7 +651,7 @@ data class PersistentStatsDto (
       return true
     }
     val other = other as PersistentStatsDto
-    return MessagesPigeonUtils.deepEquals(this.receivedTotal, other.receivedTotal) && MessagesPigeonUtils.deepEquals(this.queuedWhileDead, other.queuedWhileDead) && MessagesPigeonUtils.deepEquals(this.drained, other.drained) && MessagesPigeonUtils.deepEquals(this.backgroundHandled, other.backgroundHandled) && MessagesPigeonUtils.deepEquals(this.sinceMillis, other.sinceMillis)
+    return MessagesPigeonUtils.deepEquals(this.receivedTotal, other.receivedTotal) && MessagesPigeonUtils.deepEquals(this.queuedWhileDead, other.queuedWhileDead) && MessagesPigeonUtils.deepEquals(this.drained, other.drained) && MessagesPigeonUtils.deepEquals(this.backgroundHandled, other.backgroundHandled) && MessagesPigeonUtils.deepEquals(this.rejectedMismatch, other.rejectedMismatch) && MessagesPigeonUtils.deepEquals(this.sinceMillis, other.sinceMillis)
   }
 
   override fun hashCode(): Int {
@@ -648,6 +660,7 @@ data class PersistentStatsDto (
     result = 31 * result + MessagesPigeonUtils.deepHash(this.queuedWhileDead)
     result = 31 * result + MessagesPigeonUtils.deepHash(this.drained)
     result = 31 * result + MessagesPigeonUtils.deepHash(this.backgroundHandled)
+    result = 31 * result + MessagesPigeonUtils.deepHash(this.rejectedMismatch)
     result = 31 * result + MessagesPigeonUtils.deepHash(this.sinceMillis)
     return result
   }
@@ -762,7 +775,13 @@ data class LinkIdentityDto (
    * True when declared through manifest meta-data, Info.plist or
    * configureLink, rather than defaulted from the package/bundle id.
    */
-  val isExplicit: Boolean
+  val isExplicit: Boolean,
+  /**
+   * When true a counterpart must positively prove a matching identity;
+   * unlabelled and not-yet-known peers are refused. Default false
+   * (lenient): only a known mismatch is refused.
+   */
+  val strict: Boolean
 )
  {
   companion object {
@@ -770,7 +789,8 @@ data class LinkIdentityDto (
       val linkId = pigeonVar_list[0] as String
       val protocolVersion = pigeonVar_list[1] as Long
       val isExplicit = pigeonVar_list[2] as Boolean
-      return LinkIdentityDto(linkId, protocolVersion, isExplicit)
+      val strict = pigeonVar_list[3] as Boolean
+      return LinkIdentityDto(linkId, protocolVersion, isExplicit, strict)
     }
   }
   fun toList(): List<Any?> {
@@ -778,6 +798,7 @@ data class LinkIdentityDto (
       linkId,
       protocolVersion,
       isExplicit,
+      strict,
     )
   }
   override fun equals(other: Any?): Boolean {
@@ -788,7 +809,7 @@ data class LinkIdentityDto (
       return true
     }
     val other = other as LinkIdentityDto
-    return MessagesPigeonUtils.deepEquals(this.linkId, other.linkId) && MessagesPigeonUtils.deepEquals(this.protocolVersion, other.protocolVersion) && MessagesPigeonUtils.deepEquals(this.isExplicit, other.isExplicit)
+    return MessagesPigeonUtils.deepEquals(this.linkId, other.linkId) && MessagesPigeonUtils.deepEquals(this.protocolVersion, other.protocolVersion) && MessagesPigeonUtils.deepEquals(this.isExplicit, other.isExplicit) && MessagesPigeonUtils.deepEquals(this.strict, other.strict)
   }
 
   override fun hashCode(): Int {
@@ -796,6 +817,7 @@ data class LinkIdentityDto (
     result = 31 * result + MessagesPigeonUtils.deepHash(this.linkId)
     result = 31 * result + MessagesPigeonUtils.deepHash(this.protocolVersion)
     result = 31 * result + MessagesPigeonUtils.deepHash(this.isExplicit)
+    result = 31 * result + MessagesPigeonUtils.deepHash(this.strict)
     return result
   }
 }
@@ -941,6 +963,11 @@ interface WearerLinkHostApi {
    * the same values. Null leaves that field at its resolved default.
    */
   fun configureLink(linkId: String?, protocolVersion: Long?, callback: (Result<LinkIdentityDto>) -> Unit)
+  /**
+   * Choose how unverified counterparts are treated. Persisted natively so
+   * the dead-app receive path enforces the same policy.
+   */
+  fun setStrictLinkIdentity(strict: Boolean, callback: (Result<LinkIdentityDto>) -> Unit)
   fun getCompanionStatus(callback: (Result<CompanionStatusDto>) -> Unit)
   /**
    * Interactive message. Requires a reachable counterpart.
@@ -1122,6 +1149,26 @@ interface WearerLinkHostApi {
             val linkIdArg = args[0] as String?
             val protocolVersionArg = args[1] as Long?
             api.configureLink(linkIdArg, protocolVersionArg) { result: Result<LinkIdentityDto> ->
+              val error = result.exceptionOrNull()
+              if (error != null) {
+                reply.reply(MessagesPigeonUtils.wrapError(error))
+              } else {
+                val data = result.getOrNull()
+                reply.reply(MessagesPigeonUtils.wrapResult(data))
+              }
+            }
+          }
+        } else {
+          channel.setMessageHandler(null)
+        }
+      }
+      run {
+        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.wearer_link.WearerLinkHostApi.setStrictLinkIdentity$separatedMessageChannelSuffix", codec)
+        if (api != null) {
+          channel.setMessageHandler { message, reply ->
+            val args = message as List<Any?>
+            val strictArg = args[0] as Boolean
+            api.setStrictLinkIdentity(strictArg) { result: Result<LinkIdentityDto> ->
               val error = result.exceptionOrNull()
               if (error != null) {
                 reply.reply(MessagesPigeonUtils.wrapError(error))

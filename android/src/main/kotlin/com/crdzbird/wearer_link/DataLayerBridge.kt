@@ -64,7 +64,14 @@ class DataLayerBridge(private val context: Context) {
         connected.map { it.id },
       )
     } else {
-      CompanionStatusDto(ConnectionStateDto.REACHABLE, capable.map { it.id })
+      val ids = capable.map { it.id }
+      // Reachable but every counterpart is a known foreign build: say so
+      // rather than letting sends fail one by one.
+      val allMismatch = ids.all { LinkGuard.isKnownMismatch(context, it) }
+      CompanionStatusDto(
+        if (allMismatch) ConnectionStateDto.INCOMPATIBLE else ConnectionStateDto.REACHABLE,
+        ids,
+      )
     }
   }
 
@@ -87,15 +94,23 @@ class DataLayerBridge(private val context: Context) {
     val failures = mutableListOf<NodeFailureDto>()
     for (node in nodes) {
       try {
+        // M9.2: never let a payload cross into a foreign app build.
+        LinkGuard.requireCompatible(context, node.id)
         messageClient.sendMessage(node.id, wirePath, payload).await()
         delivered.add(node.id)
+      } catch (e: FlutterError) {
+        failures.add(NodeFailureDto(node.id, e.code, e.message ?: ""))
       } catch (e: Exception) {
         failures.add(NodeFailureDto(node.id, "sendFailed", e.toString()))
       }
     }
     if (delivered.isEmpty()) {
+      // When every node failed the same way, surface that code rather than a
+      // generic one — a lone watch on a foreign build should report
+      // linkMismatch, which the caller can actually act on.
+      val codes = failures.map { it.code }.toSet()
       throw FlutterError(
-        "sendFailed",
+        codes.singleOrNull() ?: "sendFailed",
         "sendMessage reached no node: " +
           failures.joinToString { "${it.nodeId} (${it.message})" },
         null,
@@ -118,6 +133,7 @@ class DataLayerBridge(private val context: Context) {
           "are reachable — pass nodeId.",
         null,
       )
+    LinkGuard.requireCompatible(context, node.id)
     return try {
       messageClient.sendRequest(node.id, WireProtocol.requestPath(userPath), payload).await()
     } catch (e: Exception) {
@@ -441,6 +457,11 @@ class DataLayerBridge(private val context: Context) {
       )
     } catch (e: Exception) {
       throw FlutterError("unknown", "Malformed status reply: $e", null)
+    }.also { vitals ->
+      // M9.3 handshake feeds M9.2: remember who this node says it is.
+      vitals.linkId?.let {
+        LinkGuard.remember(context, node, it, vitals.protocolVersion ?: 0L)
+      }
     }
   }
 

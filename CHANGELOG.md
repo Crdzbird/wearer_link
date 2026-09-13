@@ -1,3 +1,36 @@
+## 2.4.0
+
+**M9.2 — identity is now enforced.** A counterpart on a different app build
+no longer reaches your code, and you no longer send to one by accident. This
+completes M9.
+
+* Inbound: an event whose sender declares a different link id is dropped at
+  the native boundary, before any app code, and counted in
+  `WearerPersistentStats.rejectedMismatch`.
+* Outbound: sending to a counterpart known to declare a different id fails
+  with `WearerErrorCode.linkMismatch`. When a send reaches no node and every
+  node failed the same way, that code is preserved rather than flattened to
+  `sendFailed` — a lone watch on a foreign build now reports something the
+  caller can act on.
+* `WearerConnectionState.incompatible`: reachable, but every counterpart is
+  a known foreign build.
+* `setStrictLinkIdentity(true)` moves from lenient to verified-or-nothing:
+  unlabelled and not-yet-handshaked peers are refused in both directions.
+  Persisted natively, so the dead-app receive path enforces the same policy.
+* Identity learned from a handshake or a labelled event is remembered
+  natively per node, which is what lets the transports with no metadata room
+  (Android messages, requests, file channels) be checked at all.
+
+**Lenient stays the default.** Only a *known* mismatch is refused. An
+unlabelled peer — anything pre-2.2 — keeps working exactly as before, and a
+node that has never handshaked may still be sent to. Opt into strict when
+every counterpart is known to be 2.2+.
+
+**Fake harness fix.** Endpoints previously defaulted their link id to their
+node id, so every pair modelled a mismatch. They now share one default id, as
+a phone app and its watch app share a package/bundle id; give one endpoint a
+different id to model a foreign build.
+
 ## 2.3.0
 
 **M9.3 — the identity handshake.** Ask the counterpart who it is before

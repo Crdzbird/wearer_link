@@ -929,6 +929,152 @@ void persistentStatsTests() {
       expect(utf8.decode(reply), 'pong');
     });
   });
+  group('identity enforcement (M9.2)', () {
+    /// A phone and a watch running different builds under the same plugin.
+    (WearerLinkFake, WearerLinkFake) mismatchedPair() {
+      final (phone, watch) = WearerLinkFake.pair();
+      phone.setLinkIdentity(linkId: 'com.acme.staging');
+      watch.setLinkIdentity(linkId: 'com.acme.prod');
+      return (phone, watch);
+    }
+
+    test('a foreign build never reaches app code', () async {
+      final (phone, watch) = mismatchedPair();
+      final received = <WearerEvent>[];
+      watch.messages.listen(received.add);
+
+      await phone.sendMessage('/ping', _bytes('hi'));
+      await pumpEventQueue();
+
+      expect(received, isEmpty, reason: 'dropped at the boundary');
+      expect((await watch.getPersistentStats()).rejectedMismatch, 1);
+    });
+
+    test('the same build still gets through', () async {
+      final (phone, watch) = WearerLinkFake.pair();
+      for (final side in [phone, watch]) {
+        side.setLinkIdentity(linkId: 'com.acme.fitness');
+      }
+      final received = <WearerEvent>[];
+      watch.messages.listen(received.add);
+
+      await phone.sendMessage('/ping', _bytes('hi'));
+      await pumpEventQueue();
+
+      expect(received, hasLength(1));
+      expect((await watch.getPersistentStats()).rejectedMismatch, 0);
+    });
+
+    test('a known mismatch fails the send instead of crossing builds',
+        () async {
+      final (phone, _) = mismatchedPair();
+      // The handshake is what teaches the phone who it is talking to.
+      await phone.getCounterpartIdentity();
+
+      // A lone counterpart on a foreign build: nothing got through, and the
+      // caller gets the actionable code rather than a generic sendFailed.
+      await expectLater(
+        phone.sendMessage('/ping', _bytes('hi')),
+        throwsA(isA<WearerLinkException>()
+            .having((e) => e.code, 'code', WearerErrorCode.linkMismatch)
+            .having((e) => e.message, 'message', contains('com.acme.prod'))),
+      );
+    });
+
+    test('a known mismatch shows up as an incompatible link', () async {
+      final (phone, _) = mismatchedPair();
+      expect((await phone.getCompanionStatus()).state,
+          WearerConnectionState.reachable,
+          reason: 'nothing known yet');
+
+      await phone.getCounterpartIdentity();
+
+      final status = await phone.getCompanionStatus();
+      expect(status.state, WearerConnectionState.incompatible);
+      expect(status.isReachable, isFalse);
+    });
+
+    test('a request to a known-foreign build is refused', () async {
+      final (phone, watch) = mismatchedPair();
+      watch.setRequestHandler((r) async => _bytes('should not run'));
+      await phone.getCounterpartIdentity();
+
+      await expectLater(
+        phone.sendRequest('/ask', _bytes('?')),
+        throwsA(isA<WearerLinkException>()
+            .having((e) => e.code, 'code', WearerErrorCode.linkMismatch)),
+      );
+    });
+
+    group('lenient by default', () {
+      test('an unlabelled pre-2.2 peer is still delivered', () async {
+        final (phone, watch) = WearerLinkFake.pair();
+        phone.sendUnlabelled();
+        final received = <WearerEvent>[];
+        watch.messages.listen(received.add);
+
+        await phone.sendMessage('/ping', _bytes('hi'));
+        await pumpEventQueue();
+
+        expect(received, hasLength(1), reason: 'never silently cut off');
+        expect((await watch.getPersistentStats()).rejectedMismatch, 0);
+      });
+
+      test('sending to a not-yet-handshaked peer is allowed', () async {
+        final (phone, _) = mismatchedPair();
+        // No handshake yet: nothing is positively known, so it may try.
+        final report = await phone.sendMessage('/ping', _bytes('hi'));
+        expect(report.delivered, isNotEmpty);
+      });
+    });
+
+    group('strict', () {
+      test('refuses an unlabelled peer', () async {
+        final (phone, watch) = WearerLinkFake.pair();
+        phone.sendUnlabelled();
+        await watch.setStrictLinkIdentity(true);
+
+        final received = <WearerEvent>[];
+        watch.messages.listen(received.add);
+        await phone.sendMessage('/ping', _bytes('hi'));
+        await pumpEventQueue();
+
+        expect(received, isEmpty);
+        expect((await watch.getPersistentStats()).rejectedMismatch, 1);
+      });
+
+      test('refuses a send before the identity is proved', () async {
+        final (phone, _) = WearerLinkFake.pair();
+        await phone.setStrictLinkIdentity(true);
+
+        await expectLater(
+          phone.sendMessage('/ping', _bytes('hi')),
+          throwsA(isA<WearerLinkException>()
+              .having((e) => e.code, 'code', WearerErrorCode.linkMismatch)
+              .having((e) => e.message, 'message', contains('has not proved'))),
+        );
+      });
+
+      test('allows the send once the handshake proves a match', () async {
+        final (phone, _) = WearerLinkFake.pair();
+        await phone.setStrictLinkIdentity(true);
+        await phone.getCounterpartIdentity();
+
+        final report = await phone.sendMessage('/ping', _bytes('hi'));
+        expect(report.isComplete, isTrue);
+      });
+
+      test('is reported on the identity and can be turned back off',
+          () async {
+        final (phone, _) = WearerLinkFake.pair();
+        expect((await phone.getLinkIdentity()).strict, isFalse);
+        expect((await phone.setStrictLinkIdentity(true)).strict, isTrue);
+        expect((await phone.getLinkIdentity()).toString(), contains('strict'));
+        expect((await phone.setStrictLinkIdentity(false)).strict, isFalse);
+      });
+    });
+  });
+
   group('identity handshake (M9.3)', () {
     test('the counterpart answers with who it is', () async {
       final (phone, watch) = WearerLinkFake.pair();
@@ -996,16 +1142,18 @@ void persistentStatsTests() {
             .having((e) => e.message, 'message', contains('pass nodeId'))),
       );
       final peer = await phone.getCounterpartIdentity(nodeId: 'node-c');
-      expect(peer!.linkId, 'node-c');
+      expect(peer!.linkId, 'com.example.fake');
     });
   });
 
-  group('link identity (M9.1: carried, not enforced)', () {
+  group('link identity', () {
     test('defaults to the endpoint identity and is reported as such',
         () async {
       final (phone, _) = WearerLinkFake.pair();
       final identity = await phone.getLinkIdentity();
-      expect(identity.linkId, 'node-a');
+      // Both endpoints start on one id, as a phone app and its watch app
+      // share a package/bundle id.
+      expect(identity.linkId, 'com.example.fake');
       expect(identity.protocolVersion, 0);
       expect(identity.isExplicit, isFalse,
           reason: 'defaulted from the package/bundle id');
@@ -1034,7 +1182,10 @@ void persistentStatsTests() {
 
     test('received events carry the sender identity', () async {
       final (phone, watch) = WearerLinkFake.pair();
-      phone.setLinkIdentity(linkId: 'com.acme.fitness', protocolVersion: 3);
+      // Both sides are the same app, as on a real pairing.
+      for (final side in [phone, watch]) {
+        side.setLinkIdentity(linkId: 'com.acme.fitness', protocolVersion: 3);
+      }
 
       final received = <WearerEvent>[];
       watch.messages.listen(received.add);
@@ -1062,24 +1213,24 @@ void persistentStatsTests() {
       expect(utf8.decode(received.single.payload), 'hi');
     });
 
-    test('a mismatched identity is still delivered in 9.1', () async {
+    test('a labelled event from the same build is delivered', () async {
       final (phone, watch) = WearerLinkFake.pair();
-      phone.setLinkIdentity(linkId: 'com.acme.staging');
-      watch.setLinkIdentity(linkId: 'com.acme.prod');
+      phone.setLinkIdentity(linkId: 'com.acme.fitness', protocolVersion: 3);
+      watch.setLinkIdentity(linkId: 'com.acme.fitness', protocolVersion: 3);
 
       final received = <WearerEvent>[];
       watch.messages.listen(received.add);
       await phone.sendMessage('/ping', _bytes('hi'));
       await pumpEventQueue();
 
-      // Enforcement lands in 9.2; 9.1 only makes the mismatch visible.
-      expect(received.single.linkId, 'com.acme.staging');
-      expect(received.single.linkId, isNot('com.acme.prod'));
+      expect(received.single.linkId, 'com.acme.fitness');
     });
 
     test('identity survives the queue and the dead-app replay', () async {
       final (phone, watch) = WearerLinkFake.pair();
-      phone.setLinkIdentity(linkId: 'com.acme.fitness', protocolVersion: 3);
+      for (final side in [phone, watch]) {
+        side.setLinkIdentity(linkId: 'com.acme.fitness', protocolVersion: 3);
+      }
 
       watch.simulateKill();
       await phone.transferData('/log', _bytes('while dead'));
@@ -1102,7 +1253,6 @@ void persistentStatsTests() {
         WearerFakePlatform.wearOs,
         WearerFakePlatform.wearOs,
       ]);
-      phone.setLinkIdentity(linkId: 'com.acme.fitness');
       watchB.sendUnlabelled();
 
       final atPhoneFromA = <WearerEvent>[];
@@ -1111,7 +1261,7 @@ void persistentStatsTests() {
       await watchB.sendMessage('/x', _bytes('b'), nodeId: phone.nodeId);
       await pumpEventQueue();
 
-      expect(atPhoneFromA.map((e) => e.linkId), ['node-b', null]);
+      expect(atPhoneFromA.map((e) => e.linkId), ['com.example.fake', null]);
     });
   });
 }

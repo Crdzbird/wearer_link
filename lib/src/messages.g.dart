@@ -119,6 +119,9 @@ enum ConnectionStateDto {
   unreachable,
   /// Counterpart is reachable for interactive messages.
   reachable,
+  /// Reachable, but every counterpart is known to declare a different link
+  /// id — talking to it would cross builds or protocol versions.
+  incompatible,
 }
 
 /// How an event crossed the boundary.
@@ -518,6 +521,7 @@ class PersistentStatsDto {
     required this.queuedWhileDead,
     required this.drained,
     required this.backgroundHandled,
+    required this.rejectedMismatch,
     required this.sinceMillis,
   });
 
@@ -533,6 +537,10 @@ class PersistentStatsDto {
   /// Events acked by the headless background isolate.
   int backgroundHandled;
 
+  /// Events dropped at the native boundary because the sender's link
+  /// identity did not match this app's (M9.2).
+  int rejectedMismatch;
+
   /// When these counters started (epoch ms; reset on
   /// [WearerLinkHostApi.resetPersistentStats]).
   int sinceMillis;
@@ -543,6 +551,7 @@ class PersistentStatsDto {
       queuedWhileDead,
       drained,
       backgroundHandled,
+      rejectedMismatch,
       sinceMillis,
     ];
   }
@@ -557,7 +566,8 @@ class PersistentStatsDto {
       queuedWhileDead: result[1]! as int,
       drained: result[2]! as int,
       backgroundHandled: result[3]! as int,
-      sinceMillis: result[4]! as int,
+      rejectedMismatch: result[4]! as int,
+      sinceMillis: result[5]! as int,
     );
   }
 
@@ -570,7 +580,7 @@ class PersistentStatsDto {
     if (identical(this, other)) {
       return true;
     }
-    return _deepEquals(receivedTotal, other.receivedTotal) && _deepEquals(queuedWhileDead, other.queuedWhileDead) && _deepEquals(drained, other.drained) && _deepEquals(backgroundHandled, other.backgroundHandled) && _deepEquals(sinceMillis, other.sinceMillis);
+    return _deepEquals(receivedTotal, other.receivedTotal) && _deepEquals(queuedWhileDead, other.queuedWhileDead) && _deepEquals(drained, other.drained) && _deepEquals(backgroundHandled, other.backgroundHandled) && _deepEquals(rejectedMismatch, other.rejectedMismatch) && _deepEquals(sinceMillis, other.sinceMillis);
   }
 
   @override
@@ -688,6 +698,7 @@ class LinkIdentityDto {
     required this.linkId,
     required this.protocolVersion,
     required this.isExplicit,
+    required this.strict,
   });
 
   /// Defaults to the package name (Android) / bundle identifier (iOS).
@@ -700,11 +711,17 @@ class LinkIdentityDto {
   /// configureLink, rather than defaulted from the package/bundle id.
   bool isExplicit;
 
+  /// When true a counterpart must positively prove a matching identity;
+  /// unlabelled and not-yet-known peers are refused. Default false
+  /// (lenient): only a known mismatch is refused.
+  bool strict;
+
   List<Object?> _toList() {
     return <Object?>[
       linkId,
       protocolVersion,
       isExplicit,
+      strict,
     ];
   }
 
@@ -717,6 +734,7 @@ class LinkIdentityDto {
       linkId: result[0]! as String,
       protocolVersion: result[1]! as int,
       isExplicit: result[2]! as bool,
+      strict: result[3]! as bool,
     );
   }
 
@@ -729,7 +747,7 @@ class LinkIdentityDto {
     if (identical(this, other)) {
       return true;
     }
-    return _deepEquals(linkId, other.linkId) && _deepEquals(protocolVersion, other.protocolVersion) && _deepEquals(isExplicit, other.isExplicit);
+    return _deepEquals(linkId, other.linkId) && _deepEquals(protocolVersion, other.protocolVersion) && _deepEquals(isExplicit, other.isExplicit) && _deepEquals(strict, other.strict);
   }
 
   @override
@@ -889,6 +907,27 @@ class WearerLinkHostApi {
       binaryMessenger: pigeonVar_binaryMessenger,
     );
     final Future<Object?> pigeonVar_sendFuture = pigeonVar_channel.send(<Object?>[linkId, protocolVersion]);
+    final pigeonVar_replyList = await pigeonVar_sendFuture as List<Object?>?;
+
+    final Object? pigeonVar_replyValue = _extractReplyValueOrThrow(
+        pigeonVar_replyList,
+        pigeonVar_channelName,
+        isNullValid: false,
+    )
+    ;
+    return pigeonVar_replyValue! as LinkIdentityDto;
+  }
+
+  /// Choose how unverified counterparts are treated. Persisted natively so
+  /// the dead-app receive path enforces the same policy.
+  Future<LinkIdentityDto> setStrictLinkIdentity(bool strict) async {
+    final pigeonVar_channelName = 'dev.flutter.pigeon.wearer_link.WearerLinkHostApi.setStrictLinkIdentity$pigeonVar_messageChannelSuffix';
+    final pigeonVar_channel = BasicMessageChannel<Object?>(
+      pigeonVar_channelName,
+      pigeonChannelCodec,
+      binaryMessenger: pigeonVar_binaryMessenger,
+    );
+    final Future<Object?> pigeonVar_sendFuture = pigeonVar_channel.send(<Object?>[strict]);
     final pigeonVar_replyList = await pigeonVar_sendFuture as List<Object?>?;
 
     final Object? pigeonVar_replyValue = _extractReplyValueOrThrow(

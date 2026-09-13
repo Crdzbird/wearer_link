@@ -190,6 +190,9 @@ enum ConnectionStateDto: Int {
   case unreachable = 3
   /// Counterpart is reachable for interactive messages.
   case reachable = 4
+  /// Reachable, but every counterpart is known to declare a different link
+  /// id — talking to it would cross builds or protocol versions.
+  case incompatible = 5
 }
 
 /// How an event crossed the boundary.
@@ -554,6 +557,9 @@ struct PersistentStatsDto: Hashable {
   var drained: Int64
   /// Events acked by the headless background isolate.
   var backgroundHandled: Int64
+  /// Events dropped at the native boundary because the sender's link
+  /// identity did not match this app's (M9.2).
+  var rejectedMismatch: Int64
   /// When these counters started (epoch ms; reset on
   /// [WearerLinkHostApi.resetPersistentStats]).
   var sinceMillis: Int64
@@ -565,13 +571,15 @@ struct PersistentStatsDto: Hashable {
     let queuedWhileDead = pigeonVar_list[1] as! Int64
     let drained = pigeonVar_list[2] as! Int64
     let backgroundHandled = pigeonVar_list[3] as! Int64
-    let sinceMillis = pigeonVar_list[4] as! Int64
+    let rejectedMismatch = pigeonVar_list[4] as! Int64
+    let sinceMillis = pigeonVar_list[5] as! Int64
 
     return PersistentStatsDto(
       receivedTotal: receivedTotal,
       queuedWhileDead: queuedWhileDead,
       drained: drained,
       backgroundHandled: backgroundHandled,
+      rejectedMismatch: rejectedMismatch,
       sinceMillis: sinceMillis
     )
   }
@@ -581,6 +589,7 @@ struct PersistentStatsDto: Hashable {
       queuedWhileDead,
       drained,
       backgroundHandled,
+      rejectedMismatch,
       sinceMillis,
     ]
   }
@@ -588,7 +597,7 @@ struct PersistentStatsDto: Hashable {
     if Swift.type(of: lhs) != Swift.type(of: rhs) {
       return false
     }
-    return deepEqualsMessages(lhs.receivedTotal, rhs.receivedTotal) && deepEqualsMessages(lhs.queuedWhileDead, rhs.queuedWhileDead) && deepEqualsMessages(lhs.drained, rhs.drained) && deepEqualsMessages(lhs.backgroundHandled, rhs.backgroundHandled) && deepEqualsMessages(lhs.sinceMillis, rhs.sinceMillis)
+    return deepEqualsMessages(lhs.receivedTotal, rhs.receivedTotal) && deepEqualsMessages(lhs.queuedWhileDead, rhs.queuedWhileDead) && deepEqualsMessages(lhs.drained, rhs.drained) && deepEqualsMessages(lhs.backgroundHandled, rhs.backgroundHandled) && deepEqualsMessages(lhs.rejectedMismatch, rhs.rejectedMismatch) && deepEqualsMessages(lhs.sinceMillis, rhs.sinceMillis)
   }
 
   func hash(into hasher: inout Hasher) {
@@ -597,6 +606,7 @@ struct PersistentStatsDto: Hashable {
     deepHashMessages(value: queuedWhileDead, hasher: &hasher)
     deepHashMessages(value: drained, hasher: &hasher)
     deepHashMessages(value: backgroundHandled, hasher: &hasher)
+    deepHashMessages(value: rejectedMismatch, hasher: &hasher)
     deepHashMessages(value: sinceMillis, hasher: &hasher)
   }
 }
@@ -700,6 +710,10 @@ struct LinkIdentityDto: Hashable {
   /// True when declared through manifest meta-data, Info.plist or
   /// configureLink, rather than defaulted from the package/bundle id.
   var isExplicit: Bool
+  /// When true a counterpart must positively prove a matching identity;
+  /// unlabelled and not-yet-known peers are refused. Default false
+  /// (lenient): only a known mismatch is refused.
+  var strict: Bool
 
 
   // swift-format-ignore: AlwaysUseLowerCamelCase
@@ -707,11 +721,13 @@ struct LinkIdentityDto: Hashable {
     let linkId = pigeonVar_list[0] as! String
     let protocolVersion = pigeonVar_list[1] as! Int64
     let isExplicit = pigeonVar_list[2] as! Bool
+    let strict = pigeonVar_list[3] as! Bool
 
     return LinkIdentityDto(
       linkId: linkId,
       protocolVersion: protocolVersion,
-      isExplicit: isExplicit
+      isExplicit: isExplicit,
+      strict: strict
     )
   }
   func toList() -> [Any?] {
@@ -719,13 +735,14 @@ struct LinkIdentityDto: Hashable {
       linkId,
       protocolVersion,
       isExplicit,
+      strict,
     ]
   }
   static func == (lhs: LinkIdentityDto, rhs: LinkIdentityDto) -> Bool {
     if Swift.type(of: lhs) != Swift.type(of: rhs) {
       return false
     }
-    return deepEqualsMessages(lhs.linkId, rhs.linkId) && deepEqualsMessages(lhs.protocolVersion, rhs.protocolVersion) && deepEqualsMessages(lhs.isExplicit, rhs.isExplicit)
+    return deepEqualsMessages(lhs.linkId, rhs.linkId) && deepEqualsMessages(lhs.protocolVersion, rhs.protocolVersion) && deepEqualsMessages(lhs.isExplicit, rhs.isExplicit) && deepEqualsMessages(lhs.strict, rhs.strict)
   }
 
   func hash(into hasher: inout Hasher) {
@@ -733,6 +750,7 @@ struct LinkIdentityDto: Hashable {
     deepHashMessages(value: linkId, hasher: &hasher)
     deepHashMessages(value: protocolVersion, hasher: &hasher)
     deepHashMessages(value: isExplicit, hasher: &hasher)
+    deepHashMessages(value: strict, hasher: &hasher)
   }
 }
 
@@ -854,6 +872,9 @@ protocol WearerLinkHostApi {
   /// starts — including background launches with no Dart engine — resolve
   /// the same values. Null leaves that field at its resolved default.
   func configureLink(linkId: String?, protocolVersion: Int64?, completion: @escaping (Result<LinkIdentityDto, Error>) -> Void)
+  /// Choose how unverified counterparts are treated. Persisted natively so
+  /// the dead-app receive path enforces the same policy.
+  func setStrictLinkIdentity(strict: Bool, completion: @escaping (Result<LinkIdentityDto, Error>) -> Void)
   func getCompanionStatus(completion: @escaping (Result<CompanionStatusDto, Error>) -> Void)
   /// Interactive message. Requires a reachable counterpart.
   /// On Android sends to every reachable capable node, or only [nodeId]
@@ -1006,6 +1027,25 @@ class WearerLinkHostApiSetup {
       }
     } else {
       configureLinkChannel.setMessageHandler(nil)
+    }
+    /// Choose how unverified counterparts are treated. Persisted natively so
+    /// the dead-app receive path enforces the same policy.
+    let setStrictLinkIdentityChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.wearer_link.WearerLinkHostApi.setStrictLinkIdentity\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+    if let api = api {
+      setStrictLinkIdentityChannel.setMessageHandler { message, reply in
+        let args = message as! [Any?]
+        let strictArg = args[0] as! Bool
+        api.setStrictLinkIdentity(strict: strictArg) { result in
+          switch result {
+          case .success(let res):
+            reply(wrapResult(res))
+          case .failure(let error):
+            reply(wrapError(error))
+          }
+        }
+      }
+    } else {
+      setStrictLinkIdentityChannel.setMessageHandler(nil)
     }
     let getCompanionStatusChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.wearer_link.WearerLinkHostApi.getCompanionStatus\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
     if let api = api {

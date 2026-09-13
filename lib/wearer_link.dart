@@ -191,6 +191,27 @@ class WearerLink {
         () async => WearerLinkIdentity.fromDto(await _host.getLinkIdentity()),
       );
 
+  /// Require counterparts to prove a matching identity.
+  ///
+  /// Lenient (the default) refuses only what is positively known to be
+  /// foreign — a counterpart that declares a different link id. Unlabelled
+  /// and not-yet-handshaked peers still work, so a pre-2.2 counterpart is
+  /// not silently cut off.
+  ///
+  /// Strict additionally refuses anything unverified: inbound events with no
+  /// usable identity are dropped, and a send to a node that has not
+  /// completed a handshake fails with [WearerErrorCode.linkMismatch]. Call
+  /// [getCounterpartIdentity] first when running strict.
+  ///
+  /// Persisted natively, so the dead-app receive path enforces the same
+  /// policy. Rejections are counted in
+  /// [WearerPersistentStats.rejectedMismatch].
+  Future<WearerLinkIdentity> setStrictLinkIdentity(bool strict) => _guard(
+        () async => WearerLinkIdentity.fromDto(
+          await _host.setStrictLinkIdentity(strict),
+        ),
+      );
+
   /// Override this side's declared identity, persisted natively so later
   /// cold starts — including background launches with no Dart engine —
   /// resolve the same values. Returns the identity as it now stands.
@@ -324,6 +345,7 @@ class WearerLink {
           queuedWhileDead: dto.queuedWhileDead,
           drained: dto.drained,
           backgroundHandled: dto.backgroundHandled,
+          rejectedMismatch: dto.rejectedMismatch,
           since: DateTime.fromMillisecondsSinceEpoch(dto.sinceMillis),
         );
       });

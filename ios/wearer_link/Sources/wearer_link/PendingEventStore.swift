@@ -9,6 +9,7 @@ final class StatsStore {
   static let keyQueued = "wearer_link_stats_queued"
   static let keyDrained = "wearer_link_stats_drained"
   static let keyBackground = "wearer_link_stats_background"
+  static let keyRejected = "wearer_link_stats_rejected"
   private static let keySince = "wearer_link_stats_since"
 
   private let defaults = UserDefaults.standard
@@ -29,6 +30,7 @@ final class StatsStore {
         queuedWhileDead: Int64(defaults.integer(forKey: Self.keyQueued)),
         drained: Int64(defaults.integer(forKey: Self.keyDrained)),
         backgroundHandled: Int64(defaults.integer(forKey: Self.keyBackground)),
+        rejectedMismatch: Int64(defaults.integer(forKey: Self.keyRejected)),
         sinceMillis: Int64(
           defaults.object(forKey: Self.keySince) as? Double
             ?? Date().timeIntervalSince1970 * 1000))

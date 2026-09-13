@@ -20,7 +20,12 @@ enum WearerConnectionState {
   unreachable,
 
   /// The counterpart can receive interactive messages right now.
-  reachable;
+  reachable,
+
+  /// Reachable, but every counterpart is known to declare a different link
+  /// id — a different app build or protocol version. Sends are refused with
+  /// [WearerErrorCode.linkMismatch] rather than crossing builds.
+  incompatible;
 
   /// Internal: maps the wire enum.
   @internal
@@ -31,6 +36,7 @@ enum WearerConnectionState {
         ConnectionStateDto.appNotInstalled => appNotInstalled,
         ConnectionStateDto.unreachable => unreachable,
         ConnectionStateDto.reachable => reachable,
+        ConnectionStateDto.incompatible => incompatible,
       };
 }
 
@@ -249,6 +255,7 @@ class WearerLinkIdentity {
     required this.linkId,
     required this.protocolVersion,
     required this.isExplicit,
+    this.strict = false,
   });
 
   /// Internal: maps the wire DTO.
@@ -258,6 +265,7 @@ class WearerLinkIdentity {
         linkId: dto.linkId,
         protocolVersion: dto.protocolVersion,
         isExplicit: dto.isExplicit,
+        strict: dto.strict,
       );
 
   /// Identifier both sides compare. Defaults to the package name (Android)
@@ -271,9 +279,15 @@ class WearerLinkIdentity {
   /// package/bundle id.
   final bool isExplicit;
 
+  /// When true, a counterpart must positively prove a matching identity:
+  /// unlabelled and not-yet-handshaked peers are refused. Default false
+  /// (lenient) — only a known mismatch is refused, so pre-2.2 counterparts
+  /// keep working.
+  final bool strict;
+
   @override
   String toString() => 'WearerLinkIdentity($linkId v$protocolVersion'
-      '${isExplicit ? '' : ', defaulted'})';
+      '${isExplicit ? '' : ', defaulted'}${strict ? ', strict' : ''})';
 }
 
 /// How (whether) this device can launch the companion app.
@@ -489,6 +503,10 @@ enum WearerErrorCode {
   /// A request reached the counterpart but no request handler was
   /// registered there.
   noHandler,
+
+  /// The counterpart declares a different link id, or — in strict mode —
+  /// has not proved its identity yet. See [WearerLink.getLinkIdentity].
+  linkMismatch,
 
   /// Anything the native side didn't classify.
   unknown,

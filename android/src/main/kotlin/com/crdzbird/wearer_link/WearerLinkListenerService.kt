@@ -230,6 +230,9 @@ class WearerLinkListenerService : WearableListenerService() {
 
   private fun dispatch(dto: WearerEventDto) {
     StatsStore.increment(this, StatsStore.KEY_RECEIVED)
+    // M9.2: refuse traffic that belongs to a different app build before it
+    // reaches any app code. Learns the peer's identity on the way through.
+    if (!LinkGuard.admit(this, dto)) return
     if (!DeliveryGate.isEnabled(this)) {
       // Delivery paused: divert everything to the queue, wake nothing.
       StatsStore.increment(this, StatsStore.KEY_QUEUED)

@@ -96,6 +96,7 @@ class WearerPersistentStats {
     required this.queuedWhileDead,
     required this.drained,
     required this.backgroundHandled,
+    required this.rejectedMismatch,
     required this.since,
   });
 
@@ -111,6 +112,11 @@ class WearerPersistentStats {
   /// Events acked by the headless background isolate.
   final int backgroundHandled;
 
+  /// Events dropped at the native boundary because the sender declared a
+  /// different link id (M9.2). A non-zero value means something really is
+  /// talking to the wrong build.
+  final int rejectedMismatch;
+
   /// When these counters started (reset via
   /// `WearerLink.resetPersistentStats`).
   final DateTime since;
@@ -119,6 +125,7 @@ class WearerPersistentStats {
   String toString() =>
       'WearerPersistentStats(received: $receivedTotal, queuedDead: '
       '$queuedWhileDead, drained: $drained, bgHandled: $backgroundHandled, '
+      'rejected: $rejectedMismatch, '
       'since: $since)';
 }
 

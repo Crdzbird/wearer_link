@@ -91,6 +91,14 @@ class WearerLinkPlugin : FlutterPlugin, WearerLinkHostApi {
     callback(Result.success(LinkIdentity.configure(context, linkId, protocolVersion)))
   }
 
+  override fun setStrictLinkIdentity(
+    strict: Boolean,
+    callback: (Result<LinkIdentityDto>) -> Unit,
+  ) {
+    LinkGuard.setStrict(context, strict)
+    callback(Result.success(LinkIdentity.resolve(context)))
+  }
+
   override fun sendMessage(
     path: String,
     payload: ByteArray,

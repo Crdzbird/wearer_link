@@ -172,6 +172,7 @@ internal object StatsStore {
       queuedWhileDead = p.getLong(KEY_QUEUED, 0L),
       drained = p.getLong(KEY_DRAINED, 0L),
       backgroundHandled = p.getLong(KEY_BACKGROUND, 0L),
+      rejectedMismatch = p.getLong(KEY_REJECTED, 0L),
       sinceMillis = p.getLong(KEY_SINCE, System.currentTimeMillis()),
     )
   }
@@ -195,6 +196,7 @@ internal object StatsStore {
   const val KEY_QUEUED = "queued"
   const val KEY_DRAINED = "drained"
   const val KEY_BACKGROUND = "background"
+  const val KEY_REJECTED = "rejected"
   private const val KEY_SINCE = "since"
 }
 

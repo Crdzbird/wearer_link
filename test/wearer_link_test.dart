@@ -74,6 +74,7 @@ class _FakeHost extends WearerLinkHostApi {
         queuedWhileDead: 4,
         drained: 3,
         backgroundHandled: 1,
+        rejectedMismatch: 0,
         sinceMillis: 1000,
       );
 
