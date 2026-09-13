@@ -929,4 +929,118 @@ void persistentStatsTests() {
       expect(utf8.decode(reply), 'pong');
     });
   });
+  group('link identity (M9.1: carried, not enforced)', () {
+    test('defaults to the endpoint identity and is reported as such',
+        () async {
+      final (phone, _) = WearerLinkFake.pair();
+      final identity = await phone.getLinkIdentity();
+      expect(identity.linkId, 'node-a');
+      expect(identity.protocolVersion, 0);
+      expect(identity.isExplicit, isFalse,
+          reason: 'defaulted from the package/bundle id');
+    });
+
+    test('configureLink overrides and marks the identity explicit', () async {
+      final (phone, _) = WearerLinkFake.pair();
+      final updated = await phone.configureLink(
+        linkId: 'com.acme.fitness',
+        protocolVersion: 3,
+      );
+      expect(updated.linkId, 'com.acme.fitness');
+      expect(updated.protocolVersion, 3);
+      expect(updated.isExplicit, isTrue);
+      // And it sticks for later reads.
+      expect((await phone.getLinkIdentity()).linkId, 'com.acme.fitness');
+    });
+
+    test('a null argument leaves that field alone', () async {
+      final (phone, _) = WearerLinkFake.pair();
+      await phone.configureLink(linkId: 'com.acme.fitness');
+      final updated = await phone.configureLink(protocolVersion: 7);
+      expect(updated.linkId, 'com.acme.fitness');
+      expect(updated.protocolVersion, 7);
+    });
+
+    test('received events carry the sender identity', () async {
+      final (phone, watch) = WearerLinkFake.pair();
+      phone.setLinkIdentity(linkId: 'com.acme.fitness', protocolVersion: 3);
+
+      final received = <WearerEvent>[];
+      watch.messages.listen(received.add);
+      await phone.sendMessage('/ping', _bytes('hi'));
+      await pumpEventQueue();
+
+      expect(received.single.linkId, 'com.acme.fitness');
+      expect(received.single.protocolVersion, 3);
+      expect(received.single.isLabelled, isTrue);
+    });
+
+    test('an unlabelled sender is reported, never rejected', () async {
+      final (phone, watch) = WearerLinkFake.pair();
+      phone.sendUnlabelled(); // stands in for a pre-2.2 counterpart
+
+      final received = <WearerEvent>[];
+      watch.messages.listen(received.add);
+      await phone.sendMessage('/ping', _bytes('hi'));
+      await pumpEventQueue();
+
+      // Lenient by default: it still arrives, just without a label.
+      expect(received.single.linkId, isNull);
+      expect(received.single.protocolVersion, isNull);
+      expect(received.single.isLabelled, isFalse);
+      expect(utf8.decode(received.single.payload), 'hi');
+    });
+
+    test('a mismatched identity is still delivered in 9.1', () async {
+      final (phone, watch) = WearerLinkFake.pair();
+      phone.setLinkIdentity(linkId: 'com.acme.staging');
+      watch.setLinkIdentity(linkId: 'com.acme.prod');
+
+      final received = <WearerEvent>[];
+      watch.messages.listen(received.add);
+      await phone.sendMessage('/ping', _bytes('hi'));
+      await pumpEventQueue();
+
+      // Enforcement lands in 9.2; 9.1 only makes the mismatch visible.
+      expect(received.single.linkId, 'com.acme.staging');
+      expect(received.single.linkId, isNot('com.acme.prod'));
+    });
+
+    test('identity survives the queue and the dead-app replay', () async {
+      final (phone, watch) = WearerLinkFake.pair();
+      phone.setLinkIdentity(linkId: 'com.acme.fitness', protocolVersion: 3);
+
+      watch.simulateKill();
+      await phone.transferData('/log', _bytes('while dead'));
+      await pumpEventQueue();
+
+      final relaunched = watch.relaunch();
+      final replayed = <WearerEvent>[];
+      relaunched.dataEvents.listen(replayed.add);
+      await pumpEventQueue();
+
+      expect(replayed.single.deliveredWhileDead, isTrue);
+      expect(replayed.single.linkId, 'com.acme.fitness',
+          reason: 'the persisted queue must not lose the sender label');
+      expect(replayed.single.protocolVersion, 3);
+    });
+
+    test('each endpoint on a network keeps its own identity', () async {
+      final [phone, watchA, watchB] = WearerLinkFake.network([
+        WearerFakePlatform.androidPhone,
+        WearerFakePlatform.wearOs,
+        WearerFakePlatform.wearOs,
+      ]);
+      phone.setLinkIdentity(linkId: 'com.acme.fitness');
+      watchB.sendUnlabelled();
+
+      final atPhoneFromA = <WearerEvent>[];
+      phone.messages.listen(atPhoneFromA.add);
+      await watchA.sendMessage('/x', _bytes('a'), nodeId: phone.nodeId);
+      await watchB.sendMessage('/x', _bytes('b'), nodeId: phone.nodeId);
+      await pumpEventQueue();
+
+      expect(atPhoneFromA.map((e) => e.linkId), ['node-b', null]);
+    });
+  });
 }

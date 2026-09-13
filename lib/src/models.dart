@@ -85,6 +85,8 @@ class WearerEvent {
     required this.timestamp,
     required this.deliveredWhileDead,
     this.filePath,
+    this.linkId,
+    this.protocolVersion,
   });
 
   /// Internal: maps the wire DTO.
@@ -102,6 +104,8 @@ class WearerEvent {
         timestamp: DateTime.fromMillisecondsSinceEpoch(dto.timestampMillis),
         deliveredWhileDead: dto.deliveredWhileDead,
         filePath: dto.filePath,
+        linkId: dto.linkId,
+        protocolVersion: dto.protocolVersion,
       );
 
   /// Unique id, stable across background replays — use it to deduplicate
@@ -132,6 +136,18 @@ class WearerEvent {
   /// somewhere durable if you need it beyond the next cache purge.
   /// Null for message/data events.
   final String? filePath;
+
+  /// Link id the sender stamped on this event, or null when it arrived
+  /// unlabelled — a pre-2.2 counterpart, or a transport with no metadata
+  /// room (Android `MessageClient` messages and requests). As of 2.2 this is
+  /// carried and reported only; nothing is rejected on its account.
+  final String? linkId;
+
+  /// Protocol version the sender declared, null when unlabelled.
+  final int? protocolVersion;
+
+  /// Whether the sender identified itself at all.
+  bool get isLabelled => linkId != null;
 
   @override
   String toString() =>
@@ -218,6 +234,46 @@ class WearerSendReport {
   String toString() => queued
       ? 'WearerSendReport(queued)'
       : 'WearerSendReport(delivered: $delivered, failures: $failures)';
+}
+
+/// Who this side of the link claims to be.
+///
+/// Resolved by the native layer so it is available before any Dart runs —
+/// events arrive while the app is dead, so identity cannot live only in a
+/// Dart setter. Resolution order: [WearerLink.configureLink] override, then
+/// `AndroidManifest.xml` meta-data / `Info.plist`, then the package name or
+/// bundle identifier.
+class WearerLinkIdentity {
+  /// Creates an identity (produced by the plugin).
+  const WearerLinkIdentity({
+    required this.linkId,
+    required this.protocolVersion,
+    required this.isExplicit,
+  });
+
+  /// Internal: maps the wire DTO.
+  @internal
+  factory WearerLinkIdentity.fromDto(LinkIdentityDto dto) =>
+      WearerLinkIdentity(
+        linkId: dto.linkId,
+        protocolVersion: dto.protocolVersion,
+        isExplicit: dto.isExplicit,
+      );
+
+  /// Identifier both sides compare. Defaults to the package name (Android)
+  /// or bundle identifier (iOS).
+  final String linkId;
+
+  /// Application-defined schema version; 0 when never declared.
+  final int protocolVersion;
+
+  /// True when declared explicitly rather than defaulted from the
+  /// package/bundle id.
+  final bool isExplicit;
+
+  @override
+  String toString() => 'WearerLinkIdentity($linkId v$protocolVersion'
+      '${isExplicit ? '' : ', defaulted'})';
 }
 
 /// How (whether) this device can launch the companion app.

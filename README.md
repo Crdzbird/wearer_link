@@ -30,7 +30,7 @@ wearer.messages.listen((event) => handle(event));    // including events that
 >   wearer_link:
 >     git:
 >       url: https://github.com/Crdzbird/wearer_link
->       ref: v2.1.0
+>       ref: v2.2.0
 > ```
 
 ---
@@ -45,6 +45,7 @@ wearer.messages.listen((event) => handle(event));    // including events that
 - [Core concepts](#core-concepts)
 - [Usage](#usage)
   - [Connection & status](#connection--status)
+  - [Link identity](#link-identity)
   - [Messages & routing](#messages--routing)
   - [Request/response RPC](#requestresponse-rpc)
   - [Typed payloads](#typed-payloads)
@@ -200,6 +201,59 @@ final vitals = await wearer.getCounterpartVitals(); // battery/model/OS —
                                                   // answered natively on the
                                                   // other side, no app code
 ```
+
+### Link identity
+
+Who is on the other end. Both OSes already scope traffic to one app pair, so
+this is not about reaching a different app — it catches the cases OS scoping
+misses: a debug build talking to a prod build under the same id, and
+protocol drift between app versions.
+
+```dart
+final me = await wearer.getLinkIdentity();
+me.linkId;            // com.acme.fitness (defaults to package/bundle id)
+me.protocolVersion;   // 3, or 0 when undeclared
+me.isExplicit;        // false when defaulted rather than declared
+
+// Every received event reports what the sender stamped.
+wearer.messages.listen((e) {
+  if (e.protocolVersion != null && e.protocolVersion! < 3) {
+    // Older counterpart: fall back rather than mis-decode.
+  }
+});
+```
+
+Declare it where the **native** layer can read it — events arrive while the
+app is dead, so identity cannot live only in Dart:
+
+```xml
+<!-- AndroidManifest.xml, inside <application> -->
+<meta-data android:name="com.crdzbird.wearer_link.linkId"
+           android:value="com.acme.fitness" />
+<meta-data android:name="com.crdzbird.wearer_link.protocolVersion"
+           android:value="3" />
+```
+```xml
+<!-- Info.plist -->
+<key>WearerLinkId</key><string>com.acme.fitness</string>
+<key>WearerLinkProtocolVersion</key><integer>3</integer>
+```
+```swift
+// Watch app, in App.init — defaults to the bundle identifier.
+WearerLinkWatch.shared.linkId = "com.acme.fitness"
+WearerLinkWatch.shared.protocolVersion = 3
+```
+
+`configureLink(...)` overrides at runtime and persists natively, but the
+manifest/`Info.plist` declaration is in force from the very first launch —
+prefer it.
+
+**As of 2.2 identity is carried and reported, never enforced.** An
+unlabelled event (`e.linkId == null`) is normal from a pre-2.2 counterpart
+and is delivered like any other. Two transports cannot carry it yet:
+Android `MessageClient` messages/requests and Android file channels are
+`(path, bytes)` with no metadata room, so they arrive unlabelled even from a
+2.2 peer. Enforcement and that gap are M9.2 in [ROADMAP.md](ROADMAP.md).
 
 ### Messages & routing
 

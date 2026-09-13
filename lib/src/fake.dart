@@ -9,6 +9,7 @@ import 'dart:ui';
 import 'package:flutter/services.dart';
 
 import '../wearer_link.dart';
+import 'dto_copy.dart';
 import 'messages.g.dart';
 
 /// Which device a [WearerLinkFake] endpoint pretends to be. Drives the
@@ -109,6 +110,30 @@ class WearerLinkFake extends WearerLink {
   /// dropping the link tears down open streams (as the platforms do) and
   /// holds queued transfers until it comes back.
   void setReachable(bool reachable) => _fakeHost.wire.setReachable(reachable);
+
+  /// Identity this endpoint stamps on what it sends, mirroring the native
+  /// manifest/Info.plist resolution. Defaults to the node id.
+  ///
+  /// ```dart
+  /// phone.setLinkIdentity(linkId: 'com.acme.fitness', protocolVersion: 3);
+  /// ```
+  void setLinkIdentity({String? linkId, int? protocolVersion}) {
+    if (linkId != null) {
+      _fakeHost
+        ..linkId = linkId
+        ..identityIsExplicit = true;
+    }
+    if (protocolVersion != null) {
+      _fakeHost
+        ..protocolVersion = protocolVersion
+        ..identityIsExplicit = true;
+    }
+  }
+
+  /// Make this endpoint send unlabelled, standing in for a counterpart on a
+  /// pre-2.2 build so the lenient path can be tested.
+  void sendUnlabelled({bool unlabelled = true}) =>
+      _fakeHost.stampIdentity = !unlabelled;
 
   /// Node ids of every other endpoint on this network.
   List<String> get counterpartNodeIds =>
@@ -232,11 +257,21 @@ class _FakeWire {
 }
 
 class _FakeHost extends WearerLinkHostApi {
-  _FakeHost(this.wire, this.nodeId, this.platform);
+  _FakeHost(this.wire, this.nodeId, this.platform) : linkId = nodeId;
 
   final _FakeWire wire;
   final String nodeId;
   final WearerFakePlatform platform;
+
+  /// Identity this endpoint stamps on what it sends. Defaults to the node
+  /// id, standing in for the package name / bundle identifier.
+  String linkId;
+  int protocolVersion = 0;
+  bool identityIsExplicit = false;
+
+  /// When false the endpoint sends unlabelled, standing in for a pre-2.2
+  /// counterpart so the lenient path stays testable.
+  bool stampIdentity = true;
 
   /// The currently-attached facade; null while "the app is killed".
   WearerLinkFake? link;
@@ -348,16 +383,8 @@ class _FakeHost extends WearerLinkHostApi {
     }
   }
 
-  WearerEventDto _asDead(WearerEventDto dto) => WearerEventDto(
-        id: dto.id,
-        kind: dto.kind,
-        path: dto.path,
-        payload: dto.payload,
-        sourceNodeId: dto.sourceNodeId,
-        timestampMillis: dto.timestampMillis,
-        deliveredWhileDead: true,
-        filePath: dto.filePath,
-      );
+  WearerEventDto _asDead(WearerEventDto dto) =>
+      dto.copyWith(deliveredWhileDead: true);
 
   WearerEventDto _event(
     WearerEventKindDto kind,
@@ -366,6 +393,8 @@ class _FakeHost extends WearerLinkHostApi {
     String? filePath,
   }) =>
       WearerEventDto(
+        linkId: stampIdentity ? linkId : null,
+        protocolVersion: stampIdentity ? protocolVersion : null,
         id: '$nodeId-${_eventSeq++}',
         kind: kind,
         path: path,
@@ -448,6 +477,29 @@ class _FakeHost extends WearerLinkHostApi {
 
   @override
   Future<bool> isSupported() async => true;
+
+  @override
+  Future<LinkIdentityDto> getLinkIdentity() async => LinkIdentityDto(
+        linkId: linkId,
+        protocolVersion: protocolVersion,
+        isExplicit: identityIsExplicit,
+      );
+
+  @override
+  Future<LinkIdentityDto> configureLink(
+    String? linkId,
+    int? protocolVersion,
+  ) async {
+    if (linkId != null) {
+      this.linkId = linkId;
+      identityIsExplicit = true;
+    }
+    if (protocolVersion != null) {
+      this.protocolVersion = protocolVersion;
+      identityIsExplicit = true;
+    }
+    return getLinkIdentity();
+  }
 
   @override
   Future<CompanionStatusDto> getCompanionStatus() async => _status();

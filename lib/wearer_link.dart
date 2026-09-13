@@ -11,6 +11,7 @@ import 'package:flutter/services.dart';
 import 'src/background.dart';
 import 'src/cipher.dart';
 import 'src/codecs.dart';
+import 'src/dto_copy.dart';
 import 'src/messages.g.dart';
 import 'src/models.dart';
 import 'src/store.dart';
@@ -167,6 +168,46 @@ class WearerLink {
   /// Whether this device has a wearable stack at all
   /// (Google Play services / WatchConnectivity support).
   Future<bool> get isSupported => _guard(() => _host.isSupported());
+
+  /// Who this side claims to be on the link.
+  ///
+  /// Resolved by the native layer: [configureLink] override, else
+  /// `AndroidManifest.xml` meta-data / `Info.plist`, else the package name
+  /// or bundle identifier.
+  ///
+  /// ```xml
+  /// <!-- AndroidManifest.xml, inside <application> -->
+  /// <meta-data android:name="com.crdzbird.wearer_link.linkId"
+  ///            android:value="com.acme.fitness" />
+  /// <meta-data android:name="com.crdzbird.wearer_link.protocolVersion"
+  ///            android:value="3" />
+  /// ```
+  /// ```xml
+  /// <!-- Info.plist -->
+  /// <key>WearerLinkId</key><string>com.acme.fitness</string>
+  /// <key>WearerLinkProtocolVersion</key><integer>3</integer>
+  /// ```
+  Future<WearerLinkIdentity> getLinkIdentity() => _guard(
+        () async => WearerLinkIdentity.fromDto(await _host.getLinkIdentity()),
+      );
+
+  /// Override this side's declared identity, persisted natively so later
+  /// cold starts — including background launches with no Dart engine —
+  /// resolve the same values. Returns the identity as it now stands.
+  ///
+  /// Prefer the manifest/`Info.plist` declaration: it is in force from the
+  /// very first launch, whereas an override only applies once Dart has run
+  /// at least once. A null argument leaves that field at its resolved
+  /// default.
+  Future<WearerLinkIdentity> configureLink({
+    String? linkId,
+    int? protocolVersion,
+  }) =>
+      _guard(
+        () async => WearerLinkIdentity.fromDto(
+          await _host.configureLink(linkId, protocolVersion),
+        ),
+      );
 
   /// What this device/pairing actually supports — check before relying on a
   /// platform-gated feature instead of catching `unsupported` errors.
@@ -702,16 +743,7 @@ class WearerLink {
     if (dto.payload.isNotEmpty) {
       final clear = await _decryptIn(dto.path, dto.payload);
       if (clear == null) return; // dropped: cipher mismatch
-      dto = WearerEventDto(
-        id: dto.id,
-        kind: dto.kind,
-        path: dto.path,
-        payload: clear,
-        sourceNodeId: dto.sourceNodeId,
-        timestampMillis: dto.timestampMillis,
-        deliveredWhileDead: dto.deliveredWhileDead,
-        filePath: dto.filePath,
-      );
+      dto = dto.copyWith(payload: clear);
     }
     if (!_seenIds.add(dto.id)) {
       _dedupDropped++;

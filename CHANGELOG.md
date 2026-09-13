@@ -1,3 +1,36 @@
+## 2.2.0
+
+**M9.1 — link identity is carried and reported.** Nothing is rejected yet;
+enforcement is M9.2.
+
+* `getLinkIdentity()` reports who this side claims to be, resolved
+  natively: `configureLink` override, else `AndroidManifest.xml` meta-data
+  (`com.crdzbird.wearer_link.linkId` / `.protocolVersion`) or `Info.plist`
+  (`WearerLinkId` / `WearerLinkProtocolVersion`), else the package name /
+  bundle identifier. Resolution is native-first because events arrive while
+  the app is dead, so identity cannot live only in a Dart setter.
+* `configureLink(linkId:, protocolVersion:)` overrides it and persists the
+  value natively, so later cold starts — including background launches with
+  no engine — resolve the same thing.
+* `WearerEvent.linkId` / `.protocolVersion` / `.isLabelled` report what the
+  sender stamped. Null means unlabelled, which is expected from a pre-2.2
+  peer and is delivered normally (lenient by default, as planned).
+* `WearerLinkWatch.linkId` / `.protocolVersion` mirror this on watchOS, and
+  `Event` gained the received values.
+* Fake harness: `setLinkIdentity(...)` and `sendUnlabelled()` per endpoint,
+  so identity, mismatch and pre-2.2 peers are unit-testable with no
+  hardware.
+
+**Known gap, deliberate.** Identity rides transports that have metadata
+room: the iOS/watchOS envelope (every kind) and Android `DataItem`s (sync,
+transferData, blobs). Android `MessageClient` messages and requests are
+`(path, bytes)` with nowhere to put it, and Android file channels likewise;
+those arrive unlabelled today. Stamping them needs either payload framing or
+a new path prefix, and both make a 2.2 sender invisible to a 2.1 receiver —
+which contradicts the lenient default. M9.2 resolves it, most likely by
+caching the counterpart identity from the M9.3 handshake so even the
+dead-app path can check it.
+
 ## 2.1.0
 
 * **Multi-node fake harness.** `WearerLinkFake.network([...])` builds any

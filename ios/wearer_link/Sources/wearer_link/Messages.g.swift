@@ -269,6 +269,12 @@ struct WearerEventDto: Hashable {
   /// For [WearerEventKindDto.file] events: absolute path of the received
   /// file (stored in the app's cache directory). Null for other kinds.
   var filePath: String? = nil
+  /// Link id the sender stamped on this event, or null when the sender did
+  /// not label it — a pre-2.2 peer, or a transport with no metadata room
+  /// (Android MessageClient messages and requests). Carried, not enforced.
+  var linkId: String? = nil
+  /// Protocol version the sender declared, null when unlabelled.
+  var protocolVersion: Int64? = nil
 
 
   // swift-format-ignore: AlwaysUseLowerCamelCase
@@ -281,6 +287,8 @@ struct WearerEventDto: Hashable {
     let timestampMillis = pigeonVar_list[5] as! Int64
     let deliveredWhileDead = pigeonVar_list[6] as! Bool
     let filePath: String? = nilOrValue(pigeonVar_list[7])
+    let linkId: String? = nilOrValue(pigeonVar_list[8])
+    let protocolVersion: Int64? = nilOrValue(pigeonVar_list[9])
 
     return WearerEventDto(
       id: id,
@@ -290,7 +298,9 @@ struct WearerEventDto: Hashable {
       sourceNodeId: sourceNodeId,
       timestampMillis: timestampMillis,
       deliveredWhileDead: deliveredWhileDead,
-      filePath: filePath
+      filePath: filePath,
+      linkId: linkId,
+      protocolVersion: protocolVersion
     )
   }
   func toList() -> [Any?] {
@@ -303,13 +313,15 @@ struct WearerEventDto: Hashable {
       timestampMillis,
       deliveredWhileDead,
       filePath,
+      linkId,
+      protocolVersion,
     ]
   }
   static func == (lhs: WearerEventDto, rhs: WearerEventDto) -> Bool {
     if Swift.type(of: lhs) != Swift.type(of: rhs) {
       return false
     }
-    return deepEqualsMessages(lhs.id, rhs.id) && deepEqualsMessages(lhs.kind, rhs.kind) && deepEqualsMessages(lhs.path, rhs.path) && deepEqualsMessages(lhs.payload, rhs.payload) && deepEqualsMessages(lhs.sourceNodeId, rhs.sourceNodeId) && deepEqualsMessages(lhs.timestampMillis, rhs.timestampMillis) && deepEqualsMessages(lhs.deliveredWhileDead, rhs.deliveredWhileDead) && deepEqualsMessages(lhs.filePath, rhs.filePath)
+    return deepEqualsMessages(lhs.id, rhs.id) && deepEqualsMessages(lhs.kind, rhs.kind) && deepEqualsMessages(lhs.path, rhs.path) && deepEqualsMessages(lhs.payload, rhs.payload) && deepEqualsMessages(lhs.sourceNodeId, rhs.sourceNodeId) && deepEqualsMessages(lhs.timestampMillis, rhs.timestampMillis) && deepEqualsMessages(lhs.deliveredWhileDead, rhs.deliveredWhileDead) && deepEqualsMessages(lhs.filePath, rhs.filePath) && deepEqualsMessages(lhs.linkId, rhs.linkId) && deepEqualsMessages(lhs.protocolVersion, rhs.protocolVersion)
   }
 
   func hash(into hasher: inout Hasher) {
@@ -322,6 +334,8 @@ struct WearerEventDto: Hashable {
     deepHashMessages(value: timestampMillis, hasher: &hasher)
     deepHashMessages(value: deliveredWhileDead, hasher: &hasher)
     deepHashMessages(value: filePath, hasher: &hasher)
+    deepHashMessages(value: linkId, hasher: &hasher)
+    deepHashMessages(value: protocolVersion, hasher: &hasher)
   }
 }
 
@@ -658,6 +672,56 @@ struct SendReportDto: Hashable {
   }
 }
 
+/// Who this side of the link claims to be.
+///
+/// Resolved natively so the receive path can read it before any Dart engine
+/// exists — events arrive while the app is dead.
+///
+/// Generated class from Pigeon that represents data sent in messages.
+struct LinkIdentityDto: Hashable {
+  /// Defaults to the package name (Android) / bundle identifier (iOS).
+  var linkId: String
+  /// Application-defined; 0 when never declared.
+  var protocolVersion: Int64
+  /// True when declared through manifest meta-data, Info.plist or
+  /// configureLink, rather than defaulted from the package/bundle id.
+  var isExplicit: Bool
+
+
+  // swift-format-ignore: AlwaysUseLowerCamelCase
+  static func fromList(_ pigeonVar_list: [Any?]) -> LinkIdentityDto? {
+    let linkId = pigeonVar_list[0] as! String
+    let protocolVersion = pigeonVar_list[1] as! Int64
+    let isExplicit = pigeonVar_list[2] as! Bool
+
+    return LinkIdentityDto(
+      linkId: linkId,
+      protocolVersion: protocolVersion,
+      isExplicit: isExplicit
+    )
+  }
+  func toList() -> [Any?] {
+    return [
+      linkId,
+      protocolVersion,
+      isExplicit,
+    ]
+  }
+  static func == (lhs: LinkIdentityDto, rhs: LinkIdentityDto) -> Bool {
+    if Swift.type(of: lhs) != Swift.type(of: rhs) {
+      return false
+    }
+    return deepEqualsMessages(lhs.linkId, rhs.linkId) && deepEqualsMessages(lhs.protocolVersion, rhs.protocolVersion) && deepEqualsMessages(lhs.isExplicit, rhs.isExplicit)
+  }
+
+  func hash(into hasher: inout Hasher) {
+    hasher.combine("LinkIdentityDto")
+    deepHashMessages(value: linkId, hasher: &hasher)
+    deepHashMessages(value: protocolVersion, hasher: &hasher)
+    deepHashMessages(value: isExplicit, hasher: &hasher)
+  }
+}
+
 private class MessagesPigeonCodecReader: FlutterStandardReader {
   override func readValue(ofType type: UInt8) -> Any? {
     switch type {
@@ -695,6 +759,8 @@ private class MessagesPigeonCodecReader: FlutterStandardReader {
       return NodeFailureDto.fromList(self.readValue() as! [Any?])
     case 139:
       return SendReportDto.fromList(self.readValue() as! [Any?])
+    case 140:
+      return LinkIdentityDto.fromList(self.readValue() as! [Any?])
     default:
       return super.readValue(ofType: type)
     }
@@ -736,6 +802,9 @@ private class MessagesPigeonCodecWriter: FlutterStandardWriter {
     } else if let value = value as? SendReportDto {
       super.writeByte(139)
       super.writeValue(value.toList())
+    } else if let value = value as? LinkIdentityDto {
+      super.writeByte(140)
+      super.writeValue(value.toList())
     } else {
       super.writeValue(value)
     }
@@ -763,6 +832,14 @@ class MessagesPigeonCodec: FlutterStandardMessageCodec, @unchecked Sendable {
 protocol WearerLinkHostApi {
   /// Whether the wearable stack exists on this device at all.
   func isSupported() throws -> Bool
+  /// This side's link identity, as the native layer resolved it:
+  /// configureLink override, else manifest meta-data / Info.plist, else the
+  /// package name / bundle identifier.
+  func getLinkIdentity(completion: @escaping (Result<LinkIdentityDto, Error>) -> Void)
+  /// Override the declared identity and persist it natively, so later cold
+  /// starts — including background launches with no Dart engine — resolve
+  /// the same values. Null leaves that field at its resolved default.
+  func configureLink(linkId: String?, protocolVersion: Int64?, completion: @escaping (Result<LinkIdentityDto, Error>) -> Void)
   func getCompanionStatus(completion: @escaping (Result<CompanionStatusDto, Error>) -> Void)
   /// Interactive message. Requires a reachable counterpart.
   /// On Android sends to every reachable capable node, or only [nodeId]
@@ -876,6 +953,45 @@ class WearerLinkHostApiSetup {
       }
     } else {
       isSupportedChannel.setMessageHandler(nil)
+    }
+    /// This side's link identity, as the native layer resolved it:
+    /// configureLink override, else manifest meta-data / Info.plist, else the
+    /// package name / bundle identifier.
+    let getLinkIdentityChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.wearer_link.WearerLinkHostApi.getLinkIdentity\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+    if let api = api {
+      getLinkIdentityChannel.setMessageHandler { _, reply in
+        api.getLinkIdentity { result in
+          switch result {
+          case .success(let res):
+            reply(wrapResult(res))
+          case .failure(let error):
+            reply(wrapError(error))
+          }
+        }
+      }
+    } else {
+      getLinkIdentityChannel.setMessageHandler(nil)
+    }
+    /// Override the declared identity and persist it natively, so later cold
+    /// starts — including background launches with no Dart engine — resolve
+    /// the same values. Null leaves that field at its resolved default.
+    let configureLinkChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.wearer_link.WearerLinkHostApi.configureLink\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+    if let api = api {
+      configureLinkChannel.setMessageHandler { message, reply in
+        let args = message as! [Any?]
+        let linkIdArg: String? = nilOrValue(args[0])
+        let protocolVersionArg: Int64? = nilOrValue(args[1])
+        api.configureLink(linkId: linkIdArg, protocolVersion: protocolVersionArg) { result in
+          switch result {
+          case .success(let res):
+            reply(wrapResult(res))
+          case .failure(let error):
+            reply(wrapError(error))
+          }
+        }
+      }
+    } else {
+      configureLinkChannel.setMessageHandler(nil)
     }
     let getCompanionStatusChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.wearer_link.WearerLinkHostApi.getCompanionStatus\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
     if let api = api {

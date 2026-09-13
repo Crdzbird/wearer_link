@@ -305,10 +305,14 @@ class DataLayerBridge(private val context: Context) {
     urgent: Boolean,
   ) {
     try {
+      val identity = LinkIdentity.resolve(context)
       val request = PutDataMapRequest.create(wirePath).apply {
         dataMap.putByteArray(WireProtocol.KEY_PAYLOAD, payload)
         dataMap.putLong(WireProtocol.KEY_TIMESTAMP, System.currentTimeMillis())
         id?.let { dataMap.putString(WireProtocol.KEY_ID, it) }
+        // Additive: pre-2.2 receivers ignore these keys.
+        dataMap.putString(WireProtocol.KEY_LINK_ID, identity.linkId)
+        dataMap.putLong(WireProtocol.KEY_PROTOCOL_VERSION, identity.protocolVersion)
       }
       val put = request.asPutDataRequest()
       if (urgent) put.setUrgent()

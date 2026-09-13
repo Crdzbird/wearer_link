@@ -313,7 +313,15 @@ data class WearerEventDto (
    * For [WearerEventKindDto.file] events: absolute path of the received
    * file (stored in the app's cache directory). Null for other kinds.
    */
-  val filePath: String? = null
+  val filePath: String? = null,
+  /**
+   * Link id the sender stamped on this event, or null when the sender did
+   * not label it — a pre-2.2 peer, or a transport with no metadata room
+   * (Android MessageClient messages and requests). Carried, not enforced.
+   */
+  val linkId: String? = null,
+  /** Protocol version the sender declared, null when unlabelled. */
+  val protocolVersion: Long? = null
 )
  {
   companion object {
@@ -326,7 +334,9 @@ data class WearerEventDto (
       val timestampMillis = pigeonVar_list[5] as Long
       val deliveredWhileDead = pigeonVar_list[6] as Boolean
       val filePath = pigeonVar_list[7] as String?
-      return WearerEventDto(id, kind, path, payload, sourceNodeId, timestampMillis, deliveredWhileDead, filePath)
+      val linkId = pigeonVar_list[8] as String?
+      val protocolVersion = pigeonVar_list[9] as Long?
+      return WearerEventDto(id, kind, path, payload, sourceNodeId, timestampMillis, deliveredWhileDead, filePath, linkId, protocolVersion)
     }
   }
   fun toList(): List<Any?> {
@@ -339,6 +349,8 @@ data class WearerEventDto (
       timestampMillis,
       deliveredWhileDead,
       filePath,
+      linkId,
+      protocolVersion,
     )
   }
   override fun equals(other: Any?): Boolean {
@@ -349,7 +361,7 @@ data class WearerEventDto (
       return true
     }
     val other = other as WearerEventDto
-    return MessagesPigeonUtils.deepEquals(this.id, other.id) && MessagesPigeonUtils.deepEquals(this.kind, other.kind) && MessagesPigeonUtils.deepEquals(this.path, other.path) && MessagesPigeonUtils.deepEquals(this.payload, other.payload) && MessagesPigeonUtils.deepEquals(this.sourceNodeId, other.sourceNodeId) && MessagesPigeonUtils.deepEquals(this.timestampMillis, other.timestampMillis) && MessagesPigeonUtils.deepEquals(this.deliveredWhileDead, other.deliveredWhileDead) && MessagesPigeonUtils.deepEquals(this.filePath, other.filePath)
+    return MessagesPigeonUtils.deepEquals(this.id, other.id) && MessagesPigeonUtils.deepEquals(this.kind, other.kind) && MessagesPigeonUtils.deepEquals(this.path, other.path) && MessagesPigeonUtils.deepEquals(this.payload, other.payload) && MessagesPigeonUtils.deepEquals(this.sourceNodeId, other.sourceNodeId) && MessagesPigeonUtils.deepEquals(this.timestampMillis, other.timestampMillis) && MessagesPigeonUtils.deepEquals(this.deliveredWhileDead, other.deliveredWhileDead) && MessagesPigeonUtils.deepEquals(this.filePath, other.filePath) && MessagesPigeonUtils.deepEquals(this.linkId, other.linkId) && MessagesPigeonUtils.deepEquals(this.protocolVersion, other.protocolVersion)
   }
 
   override fun hashCode(): Int {
@@ -362,6 +374,8 @@ data class WearerEventDto (
     result = 31 * result + MessagesPigeonUtils.deepHash(this.timestampMillis)
     result = 31 * result + MessagesPigeonUtils.deepHash(this.deliveredWhileDead)
     result = 31 * result + MessagesPigeonUtils.deepHash(this.filePath)
+    result = 31 * result + MessagesPigeonUtils.deepHash(this.linkId)
+    result = 31 * result + MessagesPigeonUtils.deepHash(this.protocolVersion)
     return result
   }
 }
@@ -716,6 +730,61 @@ data class SendReportDto (
     return result
   }
 }
+
+/**
+ * Who this side of the link claims to be.
+ *
+ * Resolved natively so the receive path can read it before any Dart engine
+ * exists — events arrive while the app is dead.
+ *
+ * Generated class from Pigeon that represents data sent in messages.
+ */
+data class LinkIdentityDto (
+  /** Defaults to the package name (Android) / bundle identifier (iOS). */
+  val linkId: String,
+  /** Application-defined; 0 when never declared. */
+  val protocolVersion: Long,
+  /**
+   * True when declared through manifest meta-data, Info.plist or
+   * configureLink, rather than defaulted from the package/bundle id.
+   */
+  val isExplicit: Boolean
+)
+ {
+  companion object {
+    fun fromList(pigeonVar_list: List<Any?>): LinkIdentityDto {
+      val linkId = pigeonVar_list[0] as String
+      val protocolVersion = pigeonVar_list[1] as Long
+      val isExplicit = pigeonVar_list[2] as Boolean
+      return LinkIdentityDto(linkId, protocolVersion, isExplicit)
+    }
+  }
+  fun toList(): List<Any?> {
+    return listOf(
+      linkId,
+      protocolVersion,
+      isExplicit,
+    )
+  }
+  override fun equals(other: Any?): Boolean {
+    if (other == null || other.javaClass != javaClass) {
+      return false
+    }
+    if (this === other) {
+      return true
+    }
+    val other = other as LinkIdentityDto
+    return MessagesPigeonUtils.deepEquals(this.linkId, other.linkId) && MessagesPigeonUtils.deepEquals(this.protocolVersion, other.protocolVersion) && MessagesPigeonUtils.deepEquals(this.isExplicit, other.isExplicit)
+  }
+
+  override fun hashCode(): Int {
+    var result = javaClass.hashCode()
+    result = 31 * result + MessagesPigeonUtils.deepHash(this.linkId)
+    result = 31 * result + MessagesPigeonUtils.deepHash(this.protocolVersion)
+    result = 31 * result + MessagesPigeonUtils.deepHash(this.isExplicit)
+    return result
+  }
+}
 private open class MessagesPigeonCodec : StandardMessageCodec() {
   override fun readValueOfType(type: Byte, buffer: ByteBuffer): Any? {
     return when (type) {
@@ -774,6 +843,11 @@ private open class MessagesPigeonCodec : StandardMessageCodec() {
           SendReportDto.fromList(it)
         }
       }
+      140.toByte() -> {
+        return (readValue(buffer) as? List<Any?>)?.let {
+          LinkIdentityDto.fromList(it)
+        }
+      }
       else -> super.readValueOfType(type, buffer)
     }
   }
@@ -823,6 +897,10 @@ private open class MessagesPigeonCodec : StandardMessageCodec() {
         stream.write(139)
         writeValue(stream, value.toList())
       }
+      is LinkIdentityDto -> {
+        stream.write(140)
+        writeValue(stream, value.toList())
+      }
       else -> super.writeValue(stream, value)
     }
   }
@@ -837,6 +915,18 @@ private open class MessagesPigeonCodec : StandardMessageCodec() {
 interface WearerLinkHostApi {
   /** Whether the wearable stack exists on this device at all. */
   fun isSupported(): Boolean
+  /**
+   * This side's link identity, as the native layer resolved it:
+   * configureLink override, else manifest meta-data / Info.plist, else the
+   * package name / bundle identifier.
+   */
+  fun getLinkIdentity(callback: (Result<LinkIdentityDto>) -> Unit)
+  /**
+   * Override the declared identity and persist it natively, so later cold
+   * starts — including background launches with no Dart engine — resolve
+   * the same values. Null leaves that field at its resolved default.
+   */
+  fun configureLink(linkId: String?, protocolVersion: Long?, callback: (Result<LinkIdentityDto>) -> Unit)
   fun getCompanionStatus(callback: (Result<CompanionStatusDto>) -> Unit)
   /**
    * Interactive message. Requires a reachable counterpart.
@@ -987,6 +1077,45 @@ interface WearerLinkHostApi {
               MessagesPigeonUtils.wrapError(exception)
             }
             reply.reply(wrapped)
+          }
+        } else {
+          channel.setMessageHandler(null)
+        }
+      }
+      run {
+        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.wearer_link.WearerLinkHostApi.getLinkIdentity$separatedMessageChannelSuffix", codec)
+        if (api != null) {
+          channel.setMessageHandler { _, reply ->
+            api.getLinkIdentity{ result: Result<LinkIdentityDto> ->
+              val error = result.exceptionOrNull()
+              if (error != null) {
+                reply.reply(MessagesPigeonUtils.wrapError(error))
+              } else {
+                val data = result.getOrNull()
+                reply.reply(MessagesPigeonUtils.wrapResult(data))
+              }
+            }
+          }
+        } else {
+          channel.setMessageHandler(null)
+        }
+      }
+      run {
+        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.wearer_link.WearerLinkHostApi.configureLink$separatedMessageChannelSuffix", codec)
+        if (api != null) {
+          channel.setMessageHandler { message, reply ->
+            val args = message as List<Any?>
+            val linkIdArg = args[0] as String?
+            val protocolVersionArg = args[1] as Long?
+            api.configureLink(linkIdArg, protocolVersionArg) { result: Result<LinkIdentityDto> ->
+              val error = result.exceptionOrNull()
+              if (error != null) {
+                reply.reply(MessagesPigeonUtils.wrapError(error))
+              } else {
+                val data = result.getOrNull()
+                reply.reply(MessagesPigeonUtils.wrapResult(data))
+              }
+            }
           }
         } else {
           channel.setMessageHandler(null)

@@ -96,6 +96,14 @@ class WearerEventDto {
   /// For [WearerEventKindDto.file] events: absolute path of the received
   /// file (stored in the app's cache directory). Null for other kinds.
   String? filePath;
+
+  /// Link id the sender stamped on this event, or null when the sender did
+  /// not label it — a pre-2.2 peer, or a transport with no metadata room
+  /// (Android MessageClient messages and requests). Carried, not enforced.
+  String? linkId;
+
+  /// Protocol version the sender declared, null when unlabelled.
+  int? protocolVersion;
 }
 
 /// How (whether) this device can launch the companion app.
@@ -251,11 +259,45 @@ class SendReportDto {
   List<NodeFailureDto> failures;
 }
 
+/// Who this side of the link claims to be.
+///
+/// Resolved natively so the receive path can read it before any Dart engine
+/// exists — events arrive while the app is dead.
+class LinkIdentityDto {
+  LinkIdentityDto({
+    required this.linkId,
+    required this.protocolVersion,
+    required this.isExplicit,
+  });
+
+  /// Defaults to the package name (Android) / bundle identifier (iOS).
+  String linkId;
+
+  /// Application-defined; 0 when never declared.
+  int protocolVersion;
+
+  /// True when declared through manifest meta-data, Info.plist or
+  /// configureLink, rather than defaulted from the package/bundle id.
+  bool isExplicit;
+}
+
 /// Dart -> native.
 @HostApi()
 abstract class WearerLinkHostApi {
   /// Whether the wearable stack exists on this device at all.
   bool isSupported();
+
+  /// This side's link identity, as the native layer resolved it:
+  /// configureLink override, else manifest meta-data / Info.plist, else the
+  /// package name / bundle identifier.
+  @async
+  LinkIdentityDto getLinkIdentity();
+
+  /// Override the declared identity and persist it natively, so later cold
+  /// starts — including background launches with no Dart engine — resolve
+  /// the same values. Null leaves that field at its resolved default.
+  @async
+  LinkIdentityDto configureLink(String? linkId, int? protocolVersion);
 
   @async
   CompanionStatusDto getCompanionStatus();

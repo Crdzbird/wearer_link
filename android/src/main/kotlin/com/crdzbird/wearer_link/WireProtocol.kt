@@ -48,6 +48,17 @@ object WireProtocol {
   const val KEY_ID = "id"
   const val KEY_TIMESTAMP = "ts"
 
+  /**
+   * Sender's link id and protocol version, stamped on every DataItem.
+   *
+   * Additive: a pre-2.2 receiver ignores unknown DataMap keys, and a 2.2
+   * receiver treats their absence as "unlabelled". MessageClient messages
+   * and requests carry no DataMap, so they stay unstamped — see M9.2.
+   * CONTRACT: mirrored by the iOS/watchOS envelope ("a"/"v").
+   */
+  const val KEY_LINK_ID = "lid"
+  const val KEY_PROTOCOL_VERSION = "pv"
+
   /** Built-in counterpart-vitals responder (request path). */
   const val STATUS_PATH = "/__wlstatus"
 

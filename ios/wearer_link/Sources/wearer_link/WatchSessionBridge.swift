@@ -13,6 +13,13 @@ enum Envelope {
   static let id = "id"
   static let timestamp = "ts"
 
+  /// Sender's link id and protocol version, stamped on every envelope.
+  /// Additive: a pre-2.2 peer ignores unknown keys and a 2.2 peer treats
+  /// their absence as "unlabelled".
+  /// CONTRACT: mirrored by Android's DataMap keys ("lid"/"pv").
+  static let linkId = "a"
+  static let protocolVersion = "v"
+
   static let kindMessage = 0
   static let kindData = 1
   static let kindFile = 2
@@ -329,12 +336,15 @@ final class WatchSessionBridge: NSObject {
   }
 
   private func envelope(path: String, payload: Data, kind: Int) -> [String: Any] {
-    [
+    let identity = LinkIdentity.resolve()
+    return [
       Envelope.path: path,
       Envelope.payload: payload,
       Envelope.kind: kind,
       Envelope.id: UUID().uuidString,
       Envelope.timestamp: Int64(Date().timeIntervalSince1970 * 1000),
+      Envelope.linkId: identity.linkId,
+      Envelope.protocolVersion: identity.protocolVersion,
     ]
   }
 
@@ -353,7 +363,10 @@ final class WatchSessionBridge: NSObject {
       sourceNodeId: Self.nodeId,
       timestampMillis: dictionary[Envelope.timestamp] as? Int64
         ?? Int64(Date().timeIntervalSince1970 * 1000),
-      filePath: filePath
+      filePath: filePath,
+      // Absent for a pre-2.2 sender: reported as unlabelled, not rejected.
+      linkId: dictionary[Envelope.linkId] as? String,
+      protocolVersion: dictionary[Envelope.protocolVersion] as? Int64
     )
     DispatchQueue.main.async {
       StatsStore.shared.increment(StatsStore.keyReceived)

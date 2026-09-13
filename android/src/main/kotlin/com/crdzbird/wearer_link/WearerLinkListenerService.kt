@@ -72,6 +72,14 @@ class WearerLinkListenerService : WearableListenerService() {
           sourceNodeId = item.uri.host ?: "",
           timestampMillis = map.getLong(WireProtocol.KEY_TIMESTAMP, System.currentTimeMillis()),
           deliveredWhileDead = WearerLinkPlugin.liveDispatcher == null,
+          // Absent for a pre-2.2 sender: reported as unlabelled, not rejected.
+          linkId = map.getString(WireProtocol.KEY_LINK_ID),
+          protocolVersion =
+            if (map.containsKey(WireProtocol.KEY_PROTOCOL_VERSION)) {
+              map.getLong(WireProtocol.KEY_PROTOCOL_VERSION)
+            } else {
+              null
+            },
         ),
       )
       if (isQueue) {

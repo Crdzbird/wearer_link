@@ -105,6 +105,19 @@ extension WearerLinkPlugin: WearerLinkHostApi {
     completion(.success(bridge.companionStatus()))
   }
 
+  func getLinkIdentity(completion: @escaping (Result<LinkIdentityDto, Error>) -> Void) {
+    completion(.success(LinkIdentity.resolve()))
+  }
+
+  func configureLink(
+    linkId: String?,
+    protocolVersion: Int64?,
+    completion: @escaping (Result<LinkIdentityDto, Error>) -> Void
+  ) {
+    completion(.success(
+      LinkIdentity.configure(linkId: linkId, protocolVersion: protocolVersion)))
+  }
+
   func sendMessage(
     path: String,
     payload: FlutterStandardTypedData,

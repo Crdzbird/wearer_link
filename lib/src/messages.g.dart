@@ -199,6 +199,8 @@ class WearerEventDto {
     required this.timestampMillis,
     required this.deliveredWhileDead,
     this.filePath,
+    this.linkId,
+    this.protocolVersion,
   });
 
   /// Unique id for at-least-once dedup across background replays.
@@ -223,6 +225,14 @@ class WearerEventDto {
   /// file (stored in the app's cache directory). Null for other kinds.
   String? filePath;
 
+  /// Link id the sender stamped on this event, or null when the sender did
+  /// not label it — a pre-2.2 peer, or a transport with no metadata room
+  /// (Android MessageClient messages and requests). Carried, not enforced.
+  String? linkId;
+
+  /// Protocol version the sender declared, null when unlabelled.
+  int? protocolVersion;
+
   List<Object?> _toList() {
     return <Object?>[
       id,
@@ -233,6 +243,8 @@ class WearerEventDto {
       timestampMillis,
       deliveredWhileDead,
       filePath,
+      linkId,
+      protocolVersion,
     ];
   }
 
@@ -250,6 +262,8 @@ class WearerEventDto {
       timestampMillis: result[5]! as int,
       deliveredWhileDead: result[6]! as bool,
       filePath: result[7] as String?,
+      linkId: result[8] as String?,
+      protocolVersion: result[9] as int?,
     );
   }
 
@@ -262,7 +276,7 @@ class WearerEventDto {
     if (identical(this, other)) {
       return true;
     }
-    return _deepEquals(id, other.id) && _deepEquals(kind, other.kind) && _deepEquals(path, other.path) && _deepEquals(payload, other.payload) && _deepEquals(sourceNodeId, other.sourceNodeId) && _deepEquals(timestampMillis, other.timestampMillis) && _deepEquals(deliveredWhileDead, other.deliveredWhileDead) && _deepEquals(filePath, other.filePath);
+    return _deepEquals(id, other.id) && _deepEquals(kind, other.kind) && _deepEquals(path, other.path) && _deepEquals(payload, other.payload) && _deepEquals(sourceNodeId, other.sourceNodeId) && _deepEquals(timestampMillis, other.timestampMillis) && _deepEquals(deliveredWhileDead, other.deliveredWhileDead) && _deepEquals(filePath, other.filePath) && _deepEquals(linkId, other.linkId) && _deepEquals(protocolVersion, other.protocolVersion);
   }
 
   @override
@@ -651,6 +665,64 @@ class SendReportDto {
   int get hashCode => _deepHash(<Object?>[runtimeType, ..._toList()]);
 }
 
+/// Who this side of the link claims to be.
+///
+/// Resolved natively so the receive path can read it before any Dart engine
+/// exists — events arrive while the app is dead.
+class LinkIdentityDto {
+  LinkIdentityDto({
+    required this.linkId,
+    required this.protocolVersion,
+    required this.isExplicit,
+  });
+
+  /// Defaults to the package name (Android) / bundle identifier (iOS).
+  String linkId;
+
+  /// Application-defined; 0 when never declared.
+  int protocolVersion;
+
+  /// True when declared through manifest meta-data, Info.plist or
+  /// configureLink, rather than defaulted from the package/bundle id.
+  bool isExplicit;
+
+  List<Object?> _toList() {
+    return <Object?>[
+      linkId,
+      protocolVersion,
+      isExplicit,
+    ];
+  }
+
+  Object encode() {
+    return _toList();  }
+
+  static LinkIdentityDto decode(Object result) {
+    result as List<Object?>;
+    return LinkIdentityDto(
+      linkId: result[0]! as String,
+      protocolVersion: result[1]! as int,
+      isExplicit: result[2]! as bool,
+    );
+  }
+
+  @override
+  // ignore: avoid_equals_and_hash_code_on_mutable_classes
+  bool operator ==(Object other) {
+    if (other is! LinkIdentityDto || other.runtimeType != runtimeType) {
+      return false;
+    }
+    if (identical(this, other)) {
+      return true;
+    }
+    return _deepEquals(linkId, other.linkId) && _deepEquals(protocolVersion, other.protocolVersion) && _deepEquals(isExplicit, other.isExplicit);
+  }
+
+  @override
+  // ignore: avoid_equals_and_hash_code_on_mutable_classes
+  int get hashCode => _deepHash(<Object?>[runtimeType, ..._toList()]);
+}
+
 
 class _PigeonCodec extends StandardMessageCodec {
   const _PigeonCodec();
@@ -692,6 +764,9 @@ class _PigeonCodec extends StandardMessageCodec {
     }    else if (value is SendReportDto) {
       buffer.putUint8(139);
       writeValue(buffer, value.encode());
+    }    else if (value is LinkIdentityDto) {
+      buffer.putUint8(140);
+      writeValue(buffer, value.encode());
     } else {
       super.writeValue(buffer, value);
     }
@@ -725,6 +800,8 @@ class _PigeonCodec extends StandardMessageCodec {
         return NodeFailureDto.decode(readValue(buffer)!);
       case 139:
         return SendReportDto.decode(readValue(buffer)!);
+      case 140:
+        return LinkIdentityDto.decode(readValue(buffer)!);
       default:
         return super.readValueOfType(type, buffer);
     }
@@ -763,6 +840,50 @@ class WearerLinkHostApi {
     )
     ;
     return pigeonVar_replyValue! as bool;
+  }
+
+  /// This side's link identity, as the native layer resolved it:
+  /// configureLink override, else manifest meta-data / Info.plist, else the
+  /// package name / bundle identifier.
+  Future<LinkIdentityDto> getLinkIdentity() async {
+    final pigeonVar_channelName = 'dev.flutter.pigeon.wearer_link.WearerLinkHostApi.getLinkIdentity$pigeonVar_messageChannelSuffix';
+    final pigeonVar_channel = BasicMessageChannel<Object?>(
+      pigeonVar_channelName,
+      pigeonChannelCodec,
+      binaryMessenger: pigeonVar_binaryMessenger,
+    );
+    final Future<Object?> pigeonVar_sendFuture = pigeonVar_channel.send(null);
+    final pigeonVar_replyList = await pigeonVar_sendFuture as List<Object?>?;
+
+    final Object? pigeonVar_replyValue = _extractReplyValueOrThrow(
+        pigeonVar_replyList,
+        pigeonVar_channelName,
+        isNullValid: false,
+    )
+    ;
+    return pigeonVar_replyValue! as LinkIdentityDto;
+  }
+
+  /// Override the declared identity and persist it natively, so later cold
+  /// starts — including background launches with no Dart engine — resolve
+  /// the same values. Null leaves that field at its resolved default.
+  Future<LinkIdentityDto> configureLink(String? linkId, int? protocolVersion) async {
+    final pigeonVar_channelName = 'dev.flutter.pigeon.wearer_link.WearerLinkHostApi.configureLink$pigeonVar_messageChannelSuffix';
+    final pigeonVar_channel = BasicMessageChannel<Object?>(
+      pigeonVar_channelName,
+      pigeonChannelCodec,
+      binaryMessenger: pigeonVar_binaryMessenger,
+    );
+    final Future<Object?> pigeonVar_sendFuture = pigeonVar_channel.send(<Object?>[linkId, protocolVersion]);
+    final pigeonVar_replyList = await pigeonVar_sendFuture as List<Object?>?;
+
+    final Object? pigeonVar_replyValue = _extractReplyValueOrThrow(
+        pigeonVar_replyList,
+        pigeonVar_channelName,
+        isNullValid: false,
+    )
+    ;
+    return pigeonVar_replyValue! as LinkIdentityDto;
   }
 
   Future<CompanionStatusDto> getCompanionStatus() async {

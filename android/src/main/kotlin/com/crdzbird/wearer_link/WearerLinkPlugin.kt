@@ -79,6 +79,18 @@ class WearerLinkPlugin : FlutterPlugin, WearerLinkHostApi {
     launchWith(callback) { it.companionStatus() }
   }
 
+  override fun getLinkIdentity(callback: (Result<LinkIdentityDto>) -> Unit) {
+    callback(Result.success(LinkIdentity.resolve(context)))
+  }
+
+  override fun configureLink(
+    linkId: String?,
+    protocolVersion: Long?,
+    callback: (Result<LinkIdentityDto>) -> Unit,
+  ) {
+    callback(Result.success(LinkIdentity.configure(context, linkId, protocolVersion)))
+  }
+
   override fun sendMessage(
     path: String,
     payload: ByteArray,

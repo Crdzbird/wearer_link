@@ -65,6 +65,13 @@ public final class WearerLinkWatch: NSObject {
     /// For file transfers: local URL of the received file (in Caches — move
     /// it somewhere durable if needed). Nil for message/data events.
     public let fileURL: URL?
+
+    /// Link id the phone stamped, or nil when it arrived unlabelled (a
+    /// pre-2.2 phone app). Reported only — nothing is rejected on it.
+    public let linkId: String?
+
+    /// Protocol version the phone declared, nil when unlabelled.
+    public let protocolVersion: Int64?
   }
 
   public enum WearerError: Error {
@@ -72,6 +79,17 @@ public final class WearerLinkWatch: NSObject {
     case phoneUnreachable
     case sendFailed(Error)
   }
+
+  /// This watch app's link id, stamped on everything it sends. Defaults to
+  /// the bundle identifier; set it in `App.init` when the phone app declares
+  /// a different id (its `WearerLinkId` Info.plist entry).
+  ///
+  /// CONTRACT: compared against the value the phone side resolves.
+  public var linkId: String = Bundle.main.bundleIdentifier ?? "unknown"
+
+  /// Application-defined schema version stamped alongside [linkId].
+  /// 0 means undeclared.
+  public var protocolVersion: Int64 = 0
 
   /// Called on the main queue for every message/data event from the phone.
   public var onEvent: ((Event) -> Void)?
@@ -396,6 +414,8 @@ public final class WearerLinkWatch: NSObject {
       Envelope.kind: kind,
       Envelope.id: UUID().uuidString,
       Envelope.timestamp: Int64(Date().timeIntervalSince1970 * 1000),
+      Envelope.linkId: linkId,
+      Envelope.protocolVersion: protocolVersion,
     ]
   }
 
@@ -433,7 +453,9 @@ public final class WearerLinkWatch: NSObject {
       payload: payload ?? Data(),
       isDataEvent: (dictionary[Envelope.kind] as? Int ?? 0) == Envelope.kindData,
       timestamp: Date(timeIntervalSince1970: TimeInterval(millis) / 1000),
-      fileURL: fileURL
+      fileURL: fileURL,
+      linkId: dictionary[Envelope.linkId] as? String,
+      protocolVersion: dictionary[Envelope.protocolVersion] as? Int64
     )
     DispatchQueue.main.async {
       if let handler = self.onEvent {
@@ -459,6 +481,12 @@ public final class WearerLinkWatch: NSObject {
     static let kind = "k"
     static let id = "id"
     static let timestamp = "ts"
+
+    /// Sender's link id and protocol version. Additive: a pre-2.2 peer
+    /// ignores them; their absence means "unlabelled".
+    static let linkId = "a"
+    static let protocolVersion = "v"
+
     static let kindMessage = 0
     static let kindData = 1
     static let kindFile = 2
@@ -582,7 +610,9 @@ extension WearerLinkWatch: WCSessionDelegate {
         payload: payload,
         isDataEvent: false,
         timestamp: Date(timeIntervalSince1970: TimeInterval(millis) / 1000),
-        fileURL: nil
+        fileURL: nil,
+        linkId: message[Envelope.linkId] as? String,
+        protocolVersion: message[Envelope.protocolVersion] as? Int64
       )
       DispatchQueue.main.async {
         guard let handler = self.onRequest else {

@@ -112,6 +112,9 @@ struct StoredEvent: Codable {
   let sourceNodeId: String
   let timestampMillis: Int64
   var filePath: String? = nil
+  /// Optional so a queue persisted by an earlier version still decodes.
+  var linkId: String? = nil
+  var protocolVersion: Int64? = nil
 
   func toDto(deliveredWhileDead: Bool) -> WearerEventDto {
     WearerEventDto(
@@ -122,7 +125,9 @@ struct StoredEvent: Codable {
       sourceNodeId: sourceNodeId,
       timestampMillis: timestampMillis,
       deliveredWhileDead: deliveredWhileDead,
-      filePath: filePath
+      filePath: filePath,
+      linkId: linkId,
+      protocolVersion: protocolVersion
     )
   }
 }
