@@ -270,6 +270,105 @@ waivers, not unknown-unknowns.
 - ~~Versioning promise documented~~ ✅ see "Versioning & wire
   compatibility" in README.
 
+## M9 — Link identity: knowing who is on the other end (v2.2.0)
+
+**The constraint that shapes this milestone.** Both OSes already scope
+traffic to one app pair, so a plugin-level identifier cannot grant
+cross-app reach and is not needed to prevent cross-app leakage:
+
+- **Android/Wear OS** — the Data Layer delivers only between apps sharing a
+  package name *and* signing certificate (the `applicationId` + signing-key
+  requirement in the README is exactly this).
+- **iOS/watchOS** — `WCSession.default` connects an iOS app to its own
+  embedded watch app; there is no API to address another vendor's app.
+
+So M9 is **not** a router. It is a guard and a handshake, covering the
+failures OS scoping does *not*:
+
+1. **Same identifier, different build** — debug/staging/prod, TestFlight vs
+   App Store. Same `applicationId`/bundle id, mismatched expectations, and
+   today they talk to each other happily.
+2. **Protocol drift** — phone v3 ⇄ watch v1: same paths, incompatible
+   payload schemas. Currently surfaces as a corrupt decode inside app code
+   instead of a typed error at the boundary.
+3. **Diagnosability** — a mismatched counterpart is invisible until its
+   payloads misbehave.
+
+### 9.0 Verify the platform fact (gates the rest)
+
+Two builds with differing package names on a paired phone/watch; confirm
+zero cross-delivery on messages, data items and capability discovery.
+
+- If confirmed (expected): the design below stands as written.
+- If cross-package delivery is possible at all, M9 grows a real routing
+  layer and must be re-planned before any code lands.
+- Effort: S (a device experiment, ~30 min). **Nothing else starts first.**
+
+### 9.1 Carry the identity
+
+A **link id** (developer-chosen, defaults to the package/bundle id) plus an
+optional **protocol version**.
+
+Declared natively, not only in Dart. INVARIANT: events arrive while the app
+is dead, so the receive path must resolve identity *before any Dart engine
+exists* — a Dart-only setter cannot be the source of truth.
+
+```xml
+<!-- AndroidManifest.xml -->
+<meta-data android:name="com.crdzbird.wearer_link.linkId"
+           android:value="com.acme.fitness" />
+<meta-data android:name="com.crdzbird.wearer_link.protocolVersion"
+           android:value="3" />
+```
+
+```dart
+// Optional override; persists natively so later cold starts see it.
+await wearer.configureLink(id: 'com.acme.fitness', protocolVersion: 3);
+```
+
+- **iOS/watchOS**: two envelope keys (`a` = link id, `v` = version) —
+  everything already rides the dictionary envelope.
+- **Android**: fold the id into the path namespace (`/wl/<idHash>/m/…`) so a
+  foreign payload cannot even parse as ours, and scope capability discovery
+  per link id. `// VERIFY:` `wear.xml` is a *static* resource, so a
+  per-app capability string needs either the consuming app declaring its
+  own or a runtime registration (`CapabilityClient.addLocalCapability`) —
+  confirm against the pinned play-services release before committing.
+- Carried and exposed read-only; no behaviour change yet.
+- Effort: M.
+
+### 9.2 Enforce, and say so
+
+- A non-matching event is dropped at the native boundary, counted in
+  `getPersistentStats`, and never delivered silently.
+- New `WearerErrorCode.linkMismatch` on sends; new
+  `WearerConnectionState.incompatible` so status reports it.
+- Effort: S–M.
+
+### 9.3 Handshake for free
+
+The built-in `/__wlstatus` responder already answers counterpart vitals
+without app code. Extend its reply with link id + protocol version, so
+`getNodes()` carries the counterpart's identity and an app can check
+compatibility before sending a byte.
+
+- Effort: S.
+
+### 9.4 Compatibility, testing, docs
+
+- **v2 peers send no identity.** Default **lenient** (accept, count, warn);
+  `strictLinkIdentity: true` opts into rejection. A v3 phone will meet v2
+  watches in the field, and silently breaking them is worse than the
+  problem being solved.
+- `WearerLinkFake.network()` takes a per-endpoint link id + version so
+  mismatch is unit-testable with no hardware.
+- README section + migration note.
+- Effort: M.
+
+**Risks:** wire compatibility with v2 peers; the static `wear.xml`
+constraint; capability-name length limits when hashing ids; and the main
+trap — building a router for something the OS forbids.
+
 ## Explicitly out of scope (and why)
 
 - **Notification bridging** — both OSes bridge notifications natively;
