@@ -10,6 +10,7 @@ import 'package:wearer_link/wearer_link.dart';
 
 class _FakeHost extends WearerLinkHostApi {
   final sent = <(String, Uint8List)>[];
+  final sentNodeIds = <String?>[];
   final synced = <(String, Uint8List)>[];
   final files = <(String, String)>[];
   final syncStore = <String, Uint8List>{};
@@ -27,14 +28,19 @@ class _FakeHost extends WearerLinkHostApi {
         nodes: ['node-1'],
       );
 
+  /// Per-node outcome this fake reports; override per test.
+  SendReportDto report = SendReportDto(delivered: ['node-1'], failures: []);
+
   @override
-  Future<void> sendMessage(
+  Future<SendReportDto> sendMessage(
     String path,
     Uint8List payload,
     String? nodeId,
   ) async {
     if (throwOnSend case final e?) throw e;
     sent.add((path, payload));
+    sentNodeIds.add(nodeId);
+    return report;
   }
 
   @override
@@ -215,6 +221,97 @@ void main() {
     await WearerLink.forTest(host).sendJson('/cmd', {'a': 1});
     expect(host.sent.single.$1, '/cmd');
     expect(jsonDecode(utf8.decode(host.sent.single.$2)), {'a': 1});
+  });
+
+  group('send reports', () {
+    test('reports the nodes that accepted the message', () async {
+      final host = _FakeHost();
+      final report =
+          await WearerLink.forTest(host).sendMessage('/x', Uint8List(0));
+      expect(report.delivered, ['node-1']);
+      expect(report.failures, isEmpty);
+      expect(report.isComplete, isTrue);
+      expect(report.queued, isFalse);
+    });
+
+    test('partial delivery surfaces failures without throwing', () async {
+      final host = _FakeHost()
+        ..report = SendReportDto(
+          delivered: ['watch-a'],
+          failures: [
+            NodeFailureDto(
+              nodeId: 'watch-b',
+              code: 'sendFailed',
+              message: 'node went away',
+            ),
+          ],
+        );
+      final report =
+          await WearerLink.forTest(host).sendMessage('/x', Uint8List(0));
+
+      expect(report.delivered, ['watch-a']);
+      expect(report.failures.single.nodeId, 'watch-b');
+      expect(report.failures.single.code, WearerErrorCode.sendFailed);
+      // Reaching one of two watches is not complete, but it is not a throw.
+      expect(report.isComplete, isFalse);
+    });
+
+    test('nodeId is forwarded for a targeted send', () async {
+      final host = _FakeHost();
+      await WearerLink.forTest(host)
+          .sendMessage('/x', Uint8List(0), nodeId: 'watch-b');
+      expect(host.sentNodeIds.single, 'watch-b');
+    });
+
+    test('sendJson returns the report too', () async {
+      final host = _FakeHost();
+      final report = await WearerLink.forTest(host).sendJson('/cmd', {'a': 1});
+      expect(report.delivered, ['node-1']);
+    });
+
+    test('queueIfUnreachable downgrades and marks the report queued',
+        () async {
+      final host = _FakeHost()
+        ..throwOnSend =
+            PlatformException(code: 'unreachable', message: 'off');
+      final report = await WearerLink.forTest(host).sendMessage(
+        '/x',
+        Uint8List(0),
+        queueIfUnreachable: true,
+      );
+      expect(report.queued, isTrue);
+      expect(report.delivered, isEmpty);
+      // The payload went out over the queued transport instead.
+      expect(host.synced.single.$1, '/x');
+    });
+
+    test('without queueIfUnreachable an unreachable send still throws',
+        () async {
+      final host = _FakeHost()
+        ..throwOnSend =
+            PlatformException(code: 'unreachable', message: 'off');
+      await expectLater(
+        WearerLink.forTest(host).sendMessage('/x', Uint8List(0)),
+        throwsA(isA<WearerLinkException>()
+            .having((e) => e.code, 'code', WearerErrorCode.unreachable)),
+      );
+      expect(host.synced, isEmpty);
+    });
+
+    test('a non-unreachable failure is never downgraded', () async {
+      final host = _FakeHost()
+        ..throwOnSend = PlatformException(code: 'sendFailed', message: 'all');
+      await expectLater(
+        WearerLink.forTest(host).sendMessage(
+          '/x',
+          Uint8List(0),
+          queueIfUnreachable: true,
+        ),
+        throwsA(isA<WearerLinkException>()
+            .having((e) => e.code, 'code', WearerErrorCode.sendFailed)),
+      );
+      expect(host.synced, isEmpty);
+    });
   });
 
   test('pending events are replayed once, routed by kind', () async {

@@ -68,16 +68,40 @@ class DataLayerBridge(private val context: Context) {
     }
   }
 
-  suspend fun sendMessage(userPath: String, payload: ByteArray, nodeId: String?) {
+  /**
+   * Sends to every target node, or only [nodeId] when given.
+   *
+   * Never aborts on the first failure: with several watches paired, a
+   * failure on one node must not hide a success on another. Every node is
+   * attempted and the per-node outcome is reported; only a send that no node
+   * accepted raises an error.
+   */
+  suspend fun sendMessage(
+    userPath: String,
+    payload: ByteArray,
+    nodeId: String?,
+  ): SendReportDto {
     val nodes = targetNodes(nodeId)
     val wirePath = WireProtocol.messagePath(userPath)
+    val delivered = mutableListOf<String>()
+    val failures = mutableListOf<NodeFailureDto>()
     for (node in nodes) {
       try {
         messageClient.sendMessage(node.id, wirePath, payload).await()
+        delivered.add(node.id)
       } catch (e: Exception) {
-        throw FlutterError("sendFailed", "sendMessage to ${node.id} failed: $e", null)
+        failures.add(NodeFailureDto(node.id, "sendFailed", e.toString()))
       }
     }
+    if (delivered.isEmpty()) {
+      throw FlutterError(
+        "sendFailed",
+        "sendMessage reached no node: " +
+          failures.joinToString { "${it.nodeId} (${it.message})" },
+        null,
+      )
+    }
+    return SendReportDto(delivered, failures)
   }
 
   /**

@@ -139,6 +139,87 @@ class WearerEvent {
       '${deliveredWhileDead ? ', replayed' : ''})';
 }
 
+/// One counterpart node an interactive send did not reach.
+class WearerNodeFailure {
+  /// Creates a failure record (produced by the plugin).
+  const WearerNodeFailure({
+    required this.nodeId,
+    required this.code,
+    required this.message,
+  });
+
+  /// Internal: maps the wire DTO.
+  @internal
+  factory WearerNodeFailure.fromDto(NodeFailureDto dto) => WearerNodeFailure(
+        nodeId: dto.nodeId,
+        code: WearerErrorCode.values.asNameMap()[dto.code] ??
+            WearerErrorCode.unknown,
+        message: dto.message,
+      );
+
+  /// Node that did not accept the message.
+  final String nodeId;
+
+  /// Why it failed.
+  final WearerErrorCode code;
+
+  /// Platform detail behind [code].
+  final String message;
+
+  @override
+  String toString() => 'WearerNodeFailure($nodeId, ${code.name}: $message)';
+}
+
+/// Outcome of [WearerLink.sendMessage].
+///
+/// A pairing can have several watches. A send that reaches some and fails
+/// others reports both rather than aborting on the first failure, so partial
+/// delivery is visible instead of looking like total failure. The send throws
+/// only when no node accepted it.
+class WearerSendReport {
+  /// Creates a report (produced by the plugin).
+  const WearerSendReport({
+    required this.delivered,
+    required this.failures,
+    this.queued = false,
+  });
+
+  /// Internal: maps the wire DTO.
+  @internal
+  factory WearerSendReport.fromDto(SendReportDto dto) => WearerSendReport(
+        delivered: List.unmodifiable(dto.delivered),
+        failures: List.unmodifiable(
+          dto.failures.map(WearerNodeFailure.fromDto),
+        ),
+      );
+
+  /// Internal: the message was downgraded to a queued transfer because the
+  /// counterpart was unreachable (`queueIfUnreachable: true`).
+  @internal
+  const WearerSendReport.queuedTransfer()
+      : delivered = const [],
+        failures = const [],
+        queued = true;
+
+  /// Node ids that accepted the message. Empty only when [queued].
+  final List<String> delivered;
+
+  /// Nodes that were attempted and failed.
+  final List<WearerNodeFailure> failures;
+
+  /// True when the message was downgraded to a queued transfer and will
+  /// arrive later as a data event rather than an interactive message.
+  final bool queued;
+
+  /// True when every attempted node accepted the message.
+  bool get isComplete => failures.isEmpty;
+
+  @override
+  String toString() => queued
+      ? 'WearerSendReport(queued)'
+      : 'WearerSendReport(delivered: $delivered, failures: $failures)';
+}
+
 /// How (whether) this device can launch the companion app.
 enum WearerCompanionLaunch {
   /// Opens the companion app in the foreground (Android/Wear OS).

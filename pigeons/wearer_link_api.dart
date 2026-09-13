@@ -220,6 +220,37 @@ class PersistentStatsDto {
   int sinceMillis;
 }
 
+/// One counterpart node an interactive send did not reach.
+class NodeFailureDto {
+  NodeFailureDto({
+    required this.nodeId,
+    required this.code,
+    required this.message,
+  });
+
+  String nodeId;
+
+  /// Matches a WearerErrorCode name on the Dart side.
+  String code;
+
+  String message;
+}
+
+/// Per-node outcome of an interactive send. A send reaching some nodes and
+/// failing others reports both instead of aborting on the first failure;
+/// the host throws only when every node failed.
+class SendReportDto {
+  SendReportDto({
+    required this.delivered,
+    required this.failures,
+  });
+
+  /// Node ids that accepted the message.
+  List<String> delivered;
+
+  List<NodeFailureDto> failures;
+}
+
 /// Dart -> native.
 @HostApi()
 abstract class WearerLinkHostApi {
@@ -232,8 +263,11 @@ abstract class WearerLinkHostApi {
   /// Interactive message. Requires a reachable counterpart.
   /// On Android sends to every reachable capable node, or only [nodeId]
   /// when given; iOS has a single counterpart and ignores [nodeId].
+  ///
+  /// Attempts every target node and reports the per-node outcome. Throws
+  /// only when no node accepted the message.
   @async
-  void sendMessage(String path, Uint8List payload, String? nodeId);
+  SendReportDto sendMessage(String path, Uint8List payload, String? nodeId);
 
   /// Request/response round trip: resolves with the counterpart's reply
   /// payload. Android: MessageClient.sendRequest RPC; iOS: sendMessage

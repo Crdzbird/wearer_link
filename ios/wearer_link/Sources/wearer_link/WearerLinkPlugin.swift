@@ -109,11 +109,17 @@ extension WearerLinkPlugin: WearerLinkHostApi {
     path: String,
     payload: FlutterStandardTypedData,
     nodeId: String?,
-    completion: @escaping (Result<Void, Error>) -> Void
+    completion: @escaping (Result<SendReportDto, Error>) -> Void
   ) {
-    // nodeId is Android-only fan-out control; iOS has a single counterpart.
+    // nodeId is Android-only fan-out control; iOS has a single counterpart,
+    // so the report is always that one node or a thrown error.
     bridge.sendMessage(path: path, payload: payload.data) { error in
-      if let error { completion(.failure(error)) } else { completion(.success(())) }
+      if let error {
+        completion(.failure(error))
+      } else {
+        completion(.success(
+          SendReportDto(delivered: [WatchSessionBridge.nodeId], failures: [])))
+      }
     }
   }
 

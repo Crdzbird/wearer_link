@@ -1,22 +1,46 @@
-## 0.1.0
+## 2.0.0
 
-Working prototype.
+**Breaking:** `sendMessage` (and `sendJson`) now return a `WearerSendReport`
+instead of `void`, and no longer abort on the first failing node.
 
-* Pigeon-typed platform channel (Dart / Kotlin / Swift).
-* Dart facade: `messages`, `dataEvents`, `connectionState` streams;
-  `sendMessage`, `syncData`, `transferData`, `launchCompanion`;
-  automatic replay of events received while the app was not running
-  (at-least-once, dedup via `WearerEvent.id`).
-* Android / Wear OS: Data Layer bridge (Message/Data/Capability clients),
-  manifest-declared `WearableListenerService` as the single receive path
-  (live dispatch to Dart or persisted bounded queue), shipped `wearer_link`
-  capability resource, `RemoteActivityHelper`-based mutual app launch.
-* iOS: singleton `WCSession` bridge safe for watch-triggered background
-  launches, persisted pending queue, per-path `applicationContext` merge,
-  reply-acknowledged interactive sends, HealthKit workout-session watch
-  launch (typed `unsupported` error elsewhere — OS policy).
-* watchOS: `WearerLinkWatch` Swift package for native watch apps
-  (activate/send/sync/transfer/wake, startup event buffering).
+* A pairing can have several watches. Previously the first node that failed
+  threw, hiding the fact that other nodes had already received the message —
+  and leaving the remaining nodes unattempted. Now every target node is
+  attempted, and the result reports `delivered` node ids alongside per-node
+  `failures`. The call throws only when *no* node accepted the message.
+* `queueIfUnreachable: true` behaves as before, and the downgraded call
+  returns a report with `queued: true`.
+* iOS pairs with exactly one watch, so its report is always that single node
+  or a thrown error; the new `WatchSessionBridge.nodeId` constant replaces
+  the `"watch"` literals that were scattered across the Swift sources.
+
+### Migrating from 1.x
+
+`await wearer.sendMessage(...)` keeps working unchanged if you ignore the
+result — the return type widened, the throw contract only narrowed. Two
+cases need attention:
+
+```dart
+// Before: any node failing threw.
+await wearer.sendMessage('/ping', payload);
+
+// After: check the report when you care about partial delivery.
+final report = await wearer.sendMessage('/ping', payload);
+if (!report.isComplete) {
+  for (final f in report.failures) {
+    log('${f.nodeId} did not get it: ${f.code.name}');
+  }
+}
+```
+
+* Anything assigning the result to `Future<void>` (e.g. a typed callback or
+  `Future<void> Function()` field) needs its type widened.
+* Code relying on a throw when *one* of several watches fails must now check
+  `report.isComplete` — single-watch pairings and iOS are unaffected.
+
+The in-memory `WearerLinkFake` models one counterpart, so `failures` is
+always empty there; partial delivery only occurs on a real multi-watch
+Android pairing.
 
 ## 1.3.0
 
@@ -291,3 +315,23 @@ M5: background isolate, file transfers, watch-face surfaces.
   Both `// VERIFY:` markers resolved.
 * iOS: added missing `import Flutter` in `PendingEventStore.swift`.
 * Example iOS project migrated to UIScene lifecycle (Flutter 3.47 tooling).
+
+## 0.1.0
+
+Working prototype.
+
+* Pigeon-typed platform channel (Dart / Kotlin / Swift).
+* Dart facade: `messages`, `dataEvents`, `connectionState` streams;
+  `sendMessage`, `syncData`, `transferData`, `launchCompanion`;
+  automatic replay of events received while the app was not running
+  (at-least-once, dedup via `WearerEvent.id`).
+* Android / Wear OS: Data Layer bridge (Message/Data/Capability clients),
+  manifest-declared `WearableListenerService` as the single receive path
+  (live dispatch to Dart or persisted bounded queue), shipped `wearer_link`
+  capability resource, `RemoteActivityHelper`-based mutual app launch.
+* iOS: singleton `WCSession` bridge safe for watch-triggered background
+  launches, persisted pending queue, per-path `applicationContext` merge,
+  reply-acknowledged interactive sends, HealthKit workout-session watch
+  launch (typed `unsupported` error elsewhere — OS policy).
+* watchOS: `WearerLinkWatch` Swift package for native watch apps
+  (activate/send/sync/transfer/wake, startup event buffering).

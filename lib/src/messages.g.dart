@@ -550,6 +550,107 @@ class PersistentStatsDto {
   int get hashCode => _deepHash(<Object?>[runtimeType, ..._toList()]);
 }
 
+/// One counterpart node an interactive send did not reach.
+class NodeFailureDto {
+  NodeFailureDto({
+    required this.nodeId,
+    required this.code,
+    required this.message,
+  });
+
+  String nodeId;
+
+  /// Matches a WearerErrorCode name on the Dart side.
+  String code;
+
+  String message;
+
+  List<Object?> _toList() {
+    return <Object?>[
+      nodeId,
+      code,
+      message,
+    ];
+  }
+
+  Object encode() {
+    return _toList();  }
+
+  static NodeFailureDto decode(Object result) {
+    result as List<Object?>;
+    return NodeFailureDto(
+      nodeId: result[0]! as String,
+      code: result[1]! as String,
+      message: result[2]! as String,
+    );
+  }
+
+  @override
+  // ignore: avoid_equals_and_hash_code_on_mutable_classes
+  bool operator ==(Object other) {
+    if (other is! NodeFailureDto || other.runtimeType != runtimeType) {
+      return false;
+    }
+    if (identical(this, other)) {
+      return true;
+    }
+    return _deepEquals(nodeId, other.nodeId) && _deepEquals(code, other.code) && _deepEquals(message, other.message);
+  }
+
+  @override
+  // ignore: avoid_equals_and_hash_code_on_mutable_classes
+  int get hashCode => _deepHash(<Object?>[runtimeType, ..._toList()]);
+}
+
+/// Per-node outcome of an interactive send. A send reaching some nodes and
+/// failing others reports both instead of aborting on the first failure;
+/// the host throws only when every node failed.
+class SendReportDto {
+  SendReportDto({
+    required this.delivered,
+    required this.failures,
+  });
+
+  /// Node ids that accepted the message.
+  List<String> delivered;
+
+  List<NodeFailureDto> failures;
+
+  List<Object?> _toList() {
+    return <Object?>[
+      delivered,
+      failures,
+    ];
+  }
+
+  Object encode() {
+    return _toList();  }
+
+  static SendReportDto decode(Object result) {
+    result as List<Object?>;
+    return SendReportDto(
+      delivered: (result[0]! as List<Object?>).cast<String>(),
+      failures: (result[1]! as List<Object?>).cast<NodeFailureDto>(),
+    );
+  }
+
+  @override
+  // ignore: avoid_equals_and_hash_code_on_mutable_classes
+  bool operator ==(Object other) {
+    if (other is! SendReportDto || other.runtimeType != runtimeType) {
+      return false;
+    }
+    if (identical(this, other)) {
+      return true;
+    }
+    return _deepEquals(delivered, other.delivered) && _deepEquals(failures, other.failures);
+  }
+
+  @override
+  // ignore: avoid_equals_and_hash_code_on_mutable_classes
+  int get hashCode => _deepHash(<Object?>[runtimeType, ..._toList()]);
+}
+
 
 class _PigeonCodec extends StandardMessageCodec {
   const _PigeonCodec();
@@ -585,6 +686,12 @@ class _PigeonCodec extends StandardMessageCodec {
     }    else if (value is PersistentStatsDto) {
       buffer.putUint8(137);
       writeValue(buffer, value.encode());
+    }    else if (value is NodeFailureDto) {
+      buffer.putUint8(138);
+      writeValue(buffer, value.encode());
+    }    else if (value is SendReportDto) {
+      buffer.putUint8(139);
+      writeValue(buffer, value.encode());
     } else {
       super.writeValue(buffer, value);
     }
@@ -614,6 +721,10 @@ class _PigeonCodec extends StandardMessageCodec {
         return CounterpartVitalsDto.decode(readValue(buffer)!);
       case 137:
         return PersistentStatsDto.decode(readValue(buffer)!);
+      case 138:
+        return NodeFailureDto.decode(readValue(buffer)!);
+      case 139:
+        return SendReportDto.decode(readValue(buffer)!);
       default:
         return super.readValueOfType(type, buffer);
     }
@@ -676,7 +787,10 @@ class WearerLinkHostApi {
   /// Interactive message. Requires a reachable counterpart.
   /// On Android sends to every reachable capable node, or only [nodeId]
   /// when given; iOS has a single counterpart and ignores [nodeId].
-  Future<void> sendMessage(String path, Uint8List payload, String? nodeId) async {
+  ///
+  /// Attempts every target node and reports the per-node outcome. Throws
+  /// only when no node accepted the message.
+  Future<SendReportDto> sendMessage(String path, Uint8List payload, String? nodeId) async {
     final pigeonVar_channelName = 'dev.flutter.pigeon.wearer_link.WearerLinkHostApi.sendMessage$pigeonVar_messageChannelSuffix';
     final pigeonVar_channel = BasicMessageChannel<Object?>(
       pigeonVar_channelName,
@@ -686,12 +800,13 @@ class WearerLinkHostApi {
     final Future<Object?> pigeonVar_sendFuture = pigeonVar_channel.send(<Object?>[path, payload, nodeId]);
     final pigeonVar_replyList = await pigeonVar_sendFuture as List<Object?>?;
 
-    _extractReplyValueOrThrow(
+    final Object? pigeonVar_replyValue = _extractReplyValueOrThrow(
         pigeonVar_replyList,
         pigeonVar_channelName,
-        isNullValid: true,
+        isNullValid: false,
     )
     ;
+    return pigeonVar_replyValue! as SendReportDto;
   }
 
   /// Request/response round trip: resolves with the counterpart's reply

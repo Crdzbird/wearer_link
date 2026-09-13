@@ -30,7 +30,7 @@ wearer.messages.listen((event) => handle(event));    // including events that
 >   wearer_link:
 >     git:
 >       url: https://github.com/Crdzbird/wearer_link
->       ref: v1.3.0
+>       ref: v2.0.0
 > ```
 
 ---
@@ -209,6 +209,15 @@ await wearer.sendMessage('/cmd', payload,
     queueIfUnreachable: true);                         // degrade to a queued
                                                        // transfer instead of
                                                        // throwing
+
+// sendMessage reports which nodes accepted it. With several watches paired,
+// a send can reach some and fail others — it throws only if none accepted.
+final report = await wearer.sendMessage('/ping', payload);
+if (!report.isComplete) {
+  for (final f in report.failures) {
+    print('${f.nodeId} missed it: ${f.code.name}');
+  }
+}
 
 wearer.messages.listen(handleAnything);                // the global stream
 wearer.on('/workout/update', handleUpdate);            // exact route
@@ -603,7 +612,10 @@ let the OS batch.
 
 ## Versioning & wire compatibility
 
-- **Semver** — breaking Dart API changes only in majors.
+- **Semver** — breaking Dart API changes only in majors. The current major
+  is **2.x**: `sendMessage`/`sendJson` return a `WearerSendReport` rather
+  than `void` (see the 2.0.0 entry in [CHANGELOG.md](CHANGELOG.md) for the
+  one-line migration).
 - **Wire compatibility is additive** — envelope keys and reserved `/__wl*`
   paths are never repurposed; newer features degrade cleanly against older
   counterparts (typed error or queued no-op — never a hang, never garbage).

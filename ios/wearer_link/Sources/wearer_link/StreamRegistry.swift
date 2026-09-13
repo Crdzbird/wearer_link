@@ -41,7 +41,7 @@ final class StreamRegistry {
         DispatchQueue.main.async {
           if reply[Frame.ok] != nil {
             self.open[id] = path
-            self.onOpened?(id, path, "watch", false)
+            self.onOpened?(id, path, WatchSessionBridge.nodeId, false)
             completion(.success(id))
           } else {
             let reason = reply[Frame.err] as? String ?? "rejected"
@@ -112,7 +112,7 @@ final class StreamRegistry {
       return
     }
     open[id] = path
-    onOpened?(id, path, "watch", true)
+    onOpened?(id, path, WatchSessionBridge.nodeId, true)
     replyHandler([Frame.ok: 1])
   }
 

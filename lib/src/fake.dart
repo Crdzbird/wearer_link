@@ -283,13 +283,17 @@ class _FakeHost extends WearerLinkHostApi {
   Future<CompanionStatusDto> getCompanionStatus() async => _status();
 
   @override
-  Future<void> sendMessage(
+  Future<SendReportDto> sendMessage(
     String path,
     Uint8List payload,
     String? nodeId,
   ) async {
     _requireReachable();
     other.receive(_event(WearerEventKindDto.message, path, payload));
+    // The fake models exactly one counterpart, so a send either reaches it
+    // or throws: `failures` is always empty here. Partial delivery only
+    // happens on a real multi-watch Android pairing.
+    return SendReportDto(delivered: [other.nodeId], failures: []);
   }
 
   @override

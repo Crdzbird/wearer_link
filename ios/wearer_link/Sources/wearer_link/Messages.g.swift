@@ -573,6 +573,91 @@ struct PersistentStatsDto: Hashable {
   }
 }
 
+/// One counterpart node an interactive send did not reach.
+///
+/// Generated class from Pigeon that represents data sent in messages.
+struct NodeFailureDto: Hashable {
+  var nodeId: String
+  /// Matches a WearerErrorCode name on the Dart side.
+  var code: String
+  var message: String
+
+
+  // swift-format-ignore: AlwaysUseLowerCamelCase
+  static func fromList(_ pigeonVar_list: [Any?]) -> NodeFailureDto? {
+    let nodeId = pigeonVar_list[0] as! String
+    let code = pigeonVar_list[1] as! String
+    let message = pigeonVar_list[2] as! String
+
+    return NodeFailureDto(
+      nodeId: nodeId,
+      code: code,
+      message: message
+    )
+  }
+  func toList() -> [Any?] {
+    return [
+      nodeId,
+      code,
+      message,
+    ]
+  }
+  static func == (lhs: NodeFailureDto, rhs: NodeFailureDto) -> Bool {
+    if Swift.type(of: lhs) != Swift.type(of: rhs) {
+      return false
+    }
+    return deepEqualsMessages(lhs.nodeId, rhs.nodeId) && deepEqualsMessages(lhs.code, rhs.code) && deepEqualsMessages(lhs.message, rhs.message)
+  }
+
+  func hash(into hasher: inout Hasher) {
+    hasher.combine("NodeFailureDto")
+    deepHashMessages(value: nodeId, hasher: &hasher)
+    deepHashMessages(value: code, hasher: &hasher)
+    deepHashMessages(value: message, hasher: &hasher)
+  }
+}
+
+/// Per-node outcome of an interactive send. A send reaching some nodes and
+/// failing others reports both instead of aborting on the first failure;
+/// the host throws only when every node failed.
+///
+/// Generated class from Pigeon that represents data sent in messages.
+struct SendReportDto: Hashable {
+  /// Node ids that accepted the message.
+  var delivered: [String]
+  var failures: [NodeFailureDto]
+
+
+  // swift-format-ignore: AlwaysUseLowerCamelCase
+  static func fromList(_ pigeonVar_list: [Any?]) -> SendReportDto? {
+    let delivered = pigeonVar_list[0] as! [String]
+    let failures = pigeonVar_list[1] as! [NodeFailureDto]
+
+    return SendReportDto(
+      delivered: delivered,
+      failures: failures
+    )
+  }
+  func toList() -> [Any?] {
+    return [
+      delivered,
+      failures,
+    ]
+  }
+  static func == (lhs: SendReportDto, rhs: SendReportDto) -> Bool {
+    if Swift.type(of: lhs) != Swift.type(of: rhs) {
+      return false
+    }
+    return deepEqualsMessages(lhs.delivered, rhs.delivered) && deepEqualsMessages(lhs.failures, rhs.failures)
+  }
+
+  func hash(into hasher: inout Hasher) {
+    hasher.combine("SendReportDto")
+    deepHashMessages(value: delivered, hasher: &hasher)
+    deepHashMessages(value: failures, hasher: &hasher)
+  }
+}
+
 private class MessagesPigeonCodecReader: FlutterStandardReader {
   override func readValue(ofType type: UInt8) -> Any? {
     switch type {
@@ -606,6 +691,10 @@ private class MessagesPigeonCodecReader: FlutterStandardReader {
       return CounterpartVitalsDto.fromList(self.readValue() as! [Any?])
     case 137:
       return PersistentStatsDto.fromList(self.readValue() as! [Any?])
+    case 138:
+      return NodeFailureDto.fromList(self.readValue() as! [Any?])
+    case 139:
+      return SendReportDto.fromList(self.readValue() as! [Any?])
     default:
       return super.readValue(ofType: type)
     }
@@ -641,6 +730,12 @@ private class MessagesPigeonCodecWriter: FlutterStandardWriter {
     } else if let value = value as? PersistentStatsDto {
       super.writeByte(137)
       super.writeValue(value.toList())
+    } else if let value = value as? NodeFailureDto {
+      super.writeByte(138)
+      super.writeValue(value.toList())
+    } else if let value = value as? SendReportDto {
+      super.writeByte(139)
+      super.writeValue(value.toList())
     } else {
       super.writeValue(value)
     }
@@ -672,7 +767,10 @@ protocol WearerLinkHostApi {
   /// Interactive message. Requires a reachable counterpart.
   /// On Android sends to every reachable capable node, or only [nodeId]
   /// when given; iOS has a single counterpart and ignores [nodeId].
-  func sendMessage(path: String, payload: FlutterStandardTypedData, nodeId: String?, completion: @escaping (Result<Void, Error>) -> Void)
+  ///
+  /// Attempts every target node and reports the per-node outcome. Throws
+  /// only when no node accepted the message.
+  func sendMessage(path: String, payload: FlutterStandardTypedData, nodeId: String?, completion: @escaping (Result<SendReportDto, Error>) -> Void)
   /// Request/response round trip: resolves with the counterpart's reply
   /// payload. Android: MessageClient.sendRequest RPC; iOS: sendMessage
   /// reply payload. The counterpart must have a request handler
@@ -797,6 +895,9 @@ class WearerLinkHostApiSetup {
     /// Interactive message. Requires a reachable counterpart.
     /// On Android sends to every reachable capable node, or only [nodeId]
     /// when given; iOS has a single counterpart and ignores [nodeId].
+    ///
+    /// Attempts every target node and reports the per-node outcome. Throws
+    /// only when no node accepted the message.
     let sendMessageChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.wearer_link.WearerLinkHostApi.sendMessage\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
     if let api = api {
       sendMessageChannel.setMessageHandler { message, reply in
@@ -806,8 +907,8 @@ class WearerLinkHostApiSetup {
         let nodeIdArg: String? = nilOrValue(args[2])
         api.sendMessage(path: pathArg, payload: payloadArg, nodeId: nodeIdArg) { result in
           switch result {
-          case .success:
-            reply(wrapResult(nil))
+          case .success(let res):
+            reply(wrapResult(res))
           case .failure(let error):
             reply(wrapError(error))
           }

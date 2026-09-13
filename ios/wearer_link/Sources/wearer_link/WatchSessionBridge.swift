@@ -46,6 +46,11 @@ enum Envelope {
 /// attached; otherwise events go to PendingEventStore (at-least-once, same
 /// contract as Android).
 final class WatchSessionBridge: NSObject {
+  /// The single counterpart node id on iOS. WatchConnectivity pairs with
+  /// exactly one watch and exposes no node identity, so every event, status
+  /// and send report uses this stable placeholder.
+  static let nodeId = "watch"
+
   static let shared = WatchSessionBridge()
 
   /// Reserved launch-intent path, exposed for the plugin's launch flow.
@@ -92,7 +97,7 @@ final class WatchSessionBridge: NSObject {
     guard session.isReachable else {
       return CompanionStatusDto(state: .unreachable, nodes: [])
     }
-    return CompanionStatusDto(state: .reachable, nodes: ["watch"])
+    return CompanionStatusDto(state: .reachable, nodes: [Self.nodeId])
   }
 
   // MARK: - Outbound
@@ -220,7 +225,7 @@ final class WatchSessionBridge: NSObject {
     guard WCSession.isSupported(), session.isPaired else { return [] }
     return [
       WearerNodeDto(
-        id: "watch",
+        id: Self.nodeId,
         displayName: "Apple Watch",
         isNearby: session.isReachable)
     ]
@@ -345,7 +350,7 @@ final class WatchSessionBridge: NSObject {
       kindRaw: kindRaw,
       path: path,
       payload: payload ?? Data(),
-      sourceNodeId: "watch",
+      sourceNodeId: Self.nodeId,
       timestampMillis: dictionary[Envelope.timestamp] as? Int64
         ?? Int64(Date().timeIntervalSince1970 * 1000),
       filePath: filePath
@@ -463,7 +468,7 @@ extension WatchSessionBridge: WCSessionDelegate {
       kind: .message,
       path: path,
       payload: FlutterStandardTypedData(bytes: payload),
-      sourceNodeId: "watch",
+      sourceNodeId: Self.nodeId,
       timestampMillis: message[Envelope.timestamp] as? Int64
         ?? Int64(Date().timeIntervalSince1970 * 1000),
       deliveredWhileDead: false)

@@ -83,7 +83,7 @@ class WearerLinkPlugin : FlutterPlugin, WearerLinkHostApi {
     path: String,
     payload: ByteArray,
     nodeId: String?,
-    callback: (Result<Unit>) -> Unit,
+    callback: (Result<SendReportDto>) -> Unit,
   ) {
     launchWith(callback) { it.sendMessage(path, payload, nodeId) }
   }

@@ -343,8 +343,13 @@ class WearerLink {
   /// With [queueIfUnreachable], an unreachable counterpart downgrades the
   /// call to [transferData] on the same path instead of throwing — it
   /// arrives later as a **data event** (order relative to live messages is
-  /// not guaranteed).
-  Future<void> sendMessage(
+  /// not guaranteed), and the returned report has `queued: true`.
+  ///
+  /// Returns a [WearerSendReport] of which nodes accepted the message. With
+  /// several watches paired a send can reach some and fail others: those
+  /// nodes appear in [WearerSendReport.failures] rather than aborting the
+  /// whole call. The call throws only when *no* node accepted it.
+  Future<WearerSendReport> sendMessage(
     String path,
     Uint8List payload, {
     String? nodeId,
@@ -355,11 +360,13 @@ class WearerLink {
       debugPrint('wearer_link -> message $path (${payload.length}B)');
     }
     try {
-      await _guard(
-        () async => _host.sendMessage(
-          path,
-          await _encryptOut(path, payload),
-          nodeId,
+      return await _guard(
+        () async => WearerSendReport.fromDto(
+          await _host.sendMessage(
+            path,
+            await _encryptOut(path, payload),
+            nodeId,
+          ),
         ),
       );
     } on WearerLinkException catch (e) {
@@ -367,6 +374,7 @@ class WearerLink {
         rethrow;
       }
       await transferData(path, payload);
+      return const WearerSendReport.queuedTransfer();
     }
   }
 
@@ -412,7 +420,7 @@ class WearerLink {
   }
 
   /// JSON convenience over [sendMessage].
-  Future<void> sendJson(String path, Map<String, Object?> json) =>
+  Future<WearerSendReport> sendJson(String path, Map<String, Object?> json) =>
       sendMessage(path, Uint8List.fromList(utf8.encode(jsonEncode(json))));
 
   /// Sync latest state for [path]. Newest value wins; delivered to the

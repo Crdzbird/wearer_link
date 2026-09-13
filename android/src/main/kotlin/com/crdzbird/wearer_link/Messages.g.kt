@@ -624,6 +624,98 @@ data class PersistentStatsDto (
     return result
   }
 }
+
+/**
+ * One counterpart node an interactive send did not reach.
+ *
+ * Generated class from Pigeon that represents data sent in messages.
+ */
+data class NodeFailureDto (
+  val nodeId: String,
+  /** Matches a WearerErrorCode name on the Dart side. */
+  val code: String,
+  val message: String
+)
+ {
+  companion object {
+    fun fromList(pigeonVar_list: List<Any?>): NodeFailureDto {
+      val nodeId = pigeonVar_list[0] as String
+      val code = pigeonVar_list[1] as String
+      val message = pigeonVar_list[2] as String
+      return NodeFailureDto(nodeId, code, message)
+    }
+  }
+  fun toList(): List<Any?> {
+    return listOf(
+      nodeId,
+      code,
+      message,
+    )
+  }
+  override fun equals(other: Any?): Boolean {
+    if (other == null || other.javaClass != javaClass) {
+      return false
+    }
+    if (this === other) {
+      return true
+    }
+    val other = other as NodeFailureDto
+    return MessagesPigeonUtils.deepEquals(this.nodeId, other.nodeId) && MessagesPigeonUtils.deepEquals(this.code, other.code) && MessagesPigeonUtils.deepEquals(this.message, other.message)
+  }
+
+  override fun hashCode(): Int {
+    var result = javaClass.hashCode()
+    result = 31 * result + MessagesPigeonUtils.deepHash(this.nodeId)
+    result = 31 * result + MessagesPigeonUtils.deepHash(this.code)
+    result = 31 * result + MessagesPigeonUtils.deepHash(this.message)
+    return result
+  }
+}
+
+/**
+ * Per-node outcome of an interactive send. A send reaching some nodes and
+ * failing others reports both instead of aborting on the first failure;
+ * the host throws only when every node failed.
+ *
+ * Generated class from Pigeon that represents data sent in messages.
+ */
+data class SendReportDto (
+  /** Node ids that accepted the message. */
+  val delivered: List<String>,
+  val failures: List<NodeFailureDto>
+)
+ {
+  companion object {
+    fun fromList(pigeonVar_list: List<Any?>): SendReportDto {
+      val delivered = pigeonVar_list[0] as List<String>
+      val failures = pigeonVar_list[1] as List<NodeFailureDto>
+      return SendReportDto(delivered, failures)
+    }
+  }
+  fun toList(): List<Any?> {
+    return listOf(
+      delivered,
+      failures,
+    )
+  }
+  override fun equals(other: Any?): Boolean {
+    if (other == null || other.javaClass != javaClass) {
+      return false
+    }
+    if (this === other) {
+      return true
+    }
+    val other = other as SendReportDto
+    return MessagesPigeonUtils.deepEquals(this.delivered, other.delivered) && MessagesPigeonUtils.deepEquals(this.failures, other.failures)
+  }
+
+  override fun hashCode(): Int {
+    var result = javaClass.hashCode()
+    result = 31 * result + MessagesPigeonUtils.deepHash(this.delivered)
+    result = 31 * result + MessagesPigeonUtils.deepHash(this.failures)
+    return result
+  }
+}
 private open class MessagesPigeonCodec : StandardMessageCodec() {
   override fun readValueOfType(type: Byte, buffer: ByteBuffer): Any? {
     return when (type) {
@@ -672,6 +764,16 @@ private open class MessagesPigeonCodec : StandardMessageCodec() {
           PersistentStatsDto.fromList(it)
         }
       }
+      138.toByte() -> {
+        return (readValue(buffer) as? List<Any?>)?.let {
+          NodeFailureDto.fromList(it)
+        }
+      }
+      139.toByte() -> {
+        return (readValue(buffer) as? List<Any?>)?.let {
+          SendReportDto.fromList(it)
+        }
+      }
       else -> super.readValueOfType(type, buffer)
     }
   }
@@ -713,6 +815,14 @@ private open class MessagesPigeonCodec : StandardMessageCodec() {
         stream.write(137)
         writeValue(stream, value.toList())
       }
+      is NodeFailureDto -> {
+        stream.write(138)
+        writeValue(stream, value.toList())
+      }
+      is SendReportDto -> {
+        stream.write(139)
+        writeValue(stream, value.toList())
+      }
       else -> super.writeValue(stream, value)
     }
   }
@@ -732,8 +842,11 @@ interface WearerLinkHostApi {
    * Interactive message. Requires a reachable counterpart.
    * On Android sends to every reachable capable node, or only [nodeId]
    * when given; iOS has a single counterpart and ignores [nodeId].
+   *
+   * Attempts every target node and reports the per-node outcome. Throws
+   * only when no node accepted the message.
    */
-  fun sendMessage(path: String, payload: ByteArray, nodeId: String?, callback: (Result<Unit>) -> Unit)
+  fun sendMessage(path: String, payload: ByteArray, nodeId: String?, callback: (Result<SendReportDto>) -> Unit)
   /**
    * Request/response round trip: resolves with the counterpart's reply
    * payload. Android: MessageClient.sendRequest RPC; iOS: sendMessage
@@ -905,12 +1018,13 @@ interface WearerLinkHostApi {
             val pathArg = args[0] as String
             val payloadArg = args[1] as ByteArray
             val nodeIdArg = args[2] as String?
-            api.sendMessage(pathArg, payloadArg, nodeIdArg) { result: Result<Unit> ->
+            api.sendMessage(pathArg, payloadArg, nodeIdArg) { result: Result<SendReportDto> ->
               val error = result.exceptionOrNull()
               if (error != null) {
                 reply.reply(MessagesPigeonUtils.wrapError(error))
               } else {
-                reply.reply(MessagesPigeonUtils.wrapResult(null))
+                val data = result.getOrNull()
+                reply.reply(MessagesPigeonUtils.wrapResult(data))
               }
             }
           }
