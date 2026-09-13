@@ -30,7 +30,7 @@ wearer.messages.listen((event) => handle(event));    // including events that
 >   wearer_link:
 >     git:
 >       url: https://github.com/Crdzbird/wearer_link
->       ref: v2.0.0
+>       ref: v2.1.0
 > ```
 
 ---
@@ -457,9 +457,8 @@ link.wakePhoneApp()
 
 ## Testing your app
 
-`package:wearer_link/testing.dart` ships an in-memory two-endpoint harness:
-both sides of your protocol run in plain Dart unit tests — **no emulators,
-no hardware**.
+`package:wearer_link/testing.dart` ships an in-memory harness: both sides of
+your protocol run in plain Dart unit tests — **no emulators, no hardware**.
 
 ```dart
 import 'package:wearer_link/testing.dart';
@@ -474,6 +473,41 @@ watch.simulateKill();              // killed app: events queue, the background
 final next = watch.relaunch();     //   handler runs; relaunch replays with
                                    //   deliveredWhileDead: true
 ```
+
+### Several watches
+
+`network` builds more than two endpoints, so the multi-watch behaviour
+Android allows can be tested too — fan-out, targeting, and the partial
+delivery that `WearerSendReport` exists for:
+
+```dart
+final [phone, watchA, watchB] = WearerLinkFake.network([
+  WearerFakePlatform.androidPhone,
+  WearerFakePlatform.wearOs,
+  WearerFakePlatform.wearOs,
+]);
+
+// One message, every watch.
+final report = await phone.sendMessage('/ping', payload);
+report.delivered;                        // [node-b, node-c]
+
+// A watch that is reachable but rejects the send: partial delivery.
+phone.failSendsTo(watchB.nodeId);
+final partial = await phone.sendMessage('/ping', payload);
+partial.delivered;                       // [node-b]
+partial.failures.single.nodeId;          // node-c   (and it did not throw)
+phone.clearSendFailure(watchB.nodeId);
+
+// A watch that goes off the air entirely: not a target at all, and queued
+// transfers for it wait until it returns.
+phone.setNodeReachable(watchB.nodeId, false);
+await phone.transferData('/log', payload);   // watchA now, watchB on return
+phone.setNodeReachable(watchB.nodeId, true);
+```
+
+Operations that need exactly one counterpart — `sendRequest`, streams,
+counterpart vitals — refuse to guess between several watches and tell you to
+pass `nodeId`, exactly as the Android implementation does.
 
 Everything works on the fake — messaging, RPC, the store, files, streams
 (including teardown on link loss), the delivery toggle, per-platform

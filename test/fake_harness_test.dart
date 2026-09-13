@@ -753,4 +753,180 @@ void persistentStatsTests() {
     expect(stats.queuedWhileDead, 1);
     expect(stats.drained, 0, reason: 'acked events never drain');
   });
+
+  group('multi-node network', () {
+    List<WearerLinkFake> phoneAndTwoWatches() => WearerLinkFake.network([
+          WearerFakePlatform.androidPhone,
+          WearerFakePlatform.wearOs,
+          WearerFakePlatform.wearOs,
+        ]);
+
+    test('network wires every endpoint to every other', () {
+      final [phone, watchA, watchB] = phoneAndTwoWatches();
+      expect(phone.nodeId, 'node-a');
+      expect(watchA.nodeId, 'node-b');
+      expect(watchB.nodeId, 'node-c');
+      expect(phone.counterpartNodeIds, ['node-b', 'node-c']);
+      expect(watchA.counterpartNodeIds, ['node-a', 'node-c']);
+    });
+
+    test('network rejects fewer than two endpoints', () {
+      expect(
+        () => WearerLinkFake.network([WearerFakePlatform.androidPhone]),
+        throwsArgumentError,
+      );
+    });
+
+    test('a message fans out to every watch', () async {
+      final [phone, watchA, watchB] = phoneAndTwoWatches();
+      final a = <WearerEvent>[];
+      final b = <WearerEvent>[];
+      watchA.messages.listen(a.add);
+      watchB.messages.listen(b.add);
+
+      final report = await phone.sendMessage('/ping', _bytes('hi'));
+      await pumpEventQueue();
+
+      expect(report.delivered, ['node-b', 'node-c']);
+      expect(report.isComplete, isTrue);
+      expect(utf8.decode(a.single.payload), 'hi');
+      expect(utf8.decode(b.single.payload), 'hi');
+      // Ids are per-delivery so receiver-side dedup still behaves.
+      expect(a.single.id, isNot(b.single.id));
+    });
+
+    test('one failing watch is reported, not thrown', () async {
+      final [phone, watchA, watchB] = phoneAndTwoWatches();
+      final a = <WearerEvent>[];
+      final b = <WearerEvent>[];
+      watchA.messages.listen(a.add);
+      watchB.messages.listen(b.add);
+
+      phone.failSendsTo(watchB.nodeId, message: 'watch went away');
+      final report = await phone.sendMessage('/ping', _bytes('hi'));
+      await pumpEventQueue();
+
+      expect(report.delivered, ['node-b']);
+      expect(report.isComplete, isFalse);
+      expect(report.failures.single.nodeId, 'node-c');
+      expect(report.failures.single.code, WearerErrorCode.sendFailed);
+      expect(report.failures.single.message, 'watch went away');
+      // The reachable watch still got it — the point of per-node reporting.
+      expect(a, hasLength(1));
+      expect(b, isEmpty);
+    });
+
+    test('clearSendFailure restores delivery', () async {
+      final [phone, _, watchB] = phoneAndTwoWatches();
+      phone.failSendsTo(watchB.nodeId);
+      expect(
+        (await phone.sendMessage('/x', _bytes('1'))).failures, hasLength(1));
+
+      phone.clearSendFailure(watchB.nodeId);
+      final report = await phone.sendMessage('/x', _bytes('2'));
+      expect(report.failures, isEmpty);
+      expect(report.delivered, ['node-b', 'node-c']);
+    });
+
+    test('every node failing throws instead of reporting', () async {
+      final [phone, watchA, watchB] = phoneAndTwoWatches();
+      phone
+        ..failSendsTo(watchA.nodeId)
+        ..failSendsTo(watchB.nodeId);
+      await expectLater(
+        phone.sendMessage('/ping', _bytes('hi')),
+        throwsA(isA<WearerLinkException>()
+            .having((e) => e.code, 'code', WearerErrorCode.sendFailed)),
+      );
+    });
+
+    test('nodeId targets a single watch', () async {
+      final [phone, watchA, watchB] = phoneAndTwoWatches();
+      final a = <WearerEvent>[];
+      final b = <WearerEvent>[];
+      watchA.messages.listen(a.add);
+      watchB.messages.listen(b.add);
+
+      final report =
+          await phone.sendMessage('/ping', _bytes('hi'), nodeId: 'node-c');
+      await pumpEventQueue();
+
+      expect(report.delivered, ['node-c']);
+      expect(a, isEmpty);
+      expect(b, hasLength(1));
+    });
+
+    test('an offline node leaves the target set entirely', () async {
+      final [phone, watchA, watchB] = phoneAndTwoWatches();
+      phone.setNodeReachable(watchB.nodeId, false);
+
+      final status = await phone.getCompanionStatus();
+      expect(status.nodes, ['node-b']);
+      expect(status.isReachable, isTrue);
+      expect(
+        (await phone.getNodes()).map((n) => (n.id, n.isNearby)),
+        [('node-b', true), ('node-c', false)],
+      );
+
+      final report = await phone.sendMessage('/ping', _bytes('hi'));
+      // Absent, not failed: an unreachable node was never a target.
+      expect(report.delivered, ['node-b']);
+      expect(report.failures, isEmpty);
+      expect(watchA.isReachable, isTrue);
+    });
+
+    test('a queued transfer waits for just the absent node', () async {
+      final [phone, watchA, watchB] = phoneAndTwoWatches();
+      final a = <WearerEvent>[];
+      final b = <WearerEvent>[];
+      watchA.dataEvents.listen(a.add);
+      watchB.dataEvents.listen(b.add);
+
+      phone.setNodeReachable(watchB.nodeId, false);
+      await phone.transferData('/log', _bytes('entry'));
+      await pumpEventQueue();
+
+      expect(a, hasLength(1), reason: 'the online watch gets it now');
+      expect(b, isEmpty);
+
+      phone.setNodeReachable(watchB.nodeId, true);
+      await pumpEventQueue();
+      expect(b, hasLength(1), reason: 'the returning watch gets it on return');
+      expect(utf8.decode(b.single.payload), 'entry');
+    });
+
+    test('sendRequest refuses to guess between two watches', () async {
+      final [phone, watchA, watchB] = phoneAndTwoWatches();
+      for (final watch in [watchA, watchB]) {
+        watch.setRequestHandler(
+          (request) async => _bytes('from ${watch.nodeId}'),
+        );
+      }
+
+      await expectLater(
+        phone.sendRequest('/ask', _bytes('?')),
+        throwsA(isA<WearerLinkException>()
+            .having((e) => e.message, 'message', contains('pass nodeId'))),
+      );
+
+      final reply = await phone.sendRequest(
+        '/ask',
+        _bytes('?'),
+        nodeId: watchB.nodeId,
+      );
+      expect(utf8.decode(reply), 'from node-c');
+    });
+
+    test('a watch addresses the phone without naming it', () async {
+      final [phone, watchA, _] = phoneAndTwoWatches();
+      phone.setRequestHandler((request) async => _bytes('pong'));
+      // watchA has two counterparts (phone + watchB), so it must pick one.
+      final reply = await watchA.sendRequest(
+        '/ask',
+        _bytes('?'),
+        nodeId: phone.nodeId,
+      );
+      expect(utf8.decode(reply), 'pong');
+    });
+  });
 }

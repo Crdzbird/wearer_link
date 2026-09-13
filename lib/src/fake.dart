@@ -24,9 +24,9 @@ enum WearerFakePlatform {
   iPhone,
 }
 
-/// In-memory two-endpoint harness: everything `WearerLink` does, with no
-/// platform underneath, so both sides of a phone ⇄ watch protocol can be
-/// unit-tested on the Dart VM.
+/// In-memory harness: everything `WearerLink` does, with no platform
+/// underneath, so both sides of a phone ⇄ watch protocol can be unit-tested
+/// on the Dart VM.
 ///
 /// ```dart
 /// final (phone, watch) = WearerLinkFake.pair();
@@ -37,6 +37,21 @@ enum WearerFakePlatform {
 /// watch.simulateKill();                    // events now queue (or hit the
 /// final relaunched = watch.relaunch();     //  background handler); replay
 /// ```                                      //  on the relaunched instance
+///
+/// [network] builds more than two endpoints — a phone with several watches,
+/// as Android allows — so fan-out and partial delivery can be tested:
+///
+/// ```dart
+/// final [phone, watchA, watchB] = WearerLinkFake.network([
+///   WearerFakePlatform.androidPhone,
+///   WearerFakePlatform.wearOs,
+///   WearerFakePlatform.wearOs,
+/// ]);
+/// phone.failSendsTo(watchB.nodeId);        // watchB starts rejecting sends
+/// final report = await phone.sendMessage('/ping', payload);
+/// report.delivered;                        // [watchA.nodeId]
+/// report.failures.single.nodeId;           // watchB.nodeId
+/// ```
 ///
 /// Injected events run through the production dispatch code (routing,
 /// dedup, stream bookkeeping) — the fake replaces only the platform.
@@ -55,14 +70,34 @@ class WearerLinkFake extends WearerLink {
     WearerFakePlatform a = WearerFakePlatform.androidPhone,
     WearerFakePlatform b = WearerFakePlatform.wearOs,
   }) {
-    final wire = _FakeWire();
-    final hostA = _FakeHost(wire, 'node-a', a);
-    final hostB = _FakeHost(wire, 'node-b', b);
-    wire
-      ..a = hostA
-      ..b = hostB;
-    return (WearerLinkFake._(hostA), WearerLinkFake._(hostB));
+    final endpoints = network([a, b]);
+    return (endpoints[0], endpoints[1]);
   }
+
+  /// Any number of endpoints on one in-memory network, every endpoint
+  /// seeing every other as a counterpart — the shape of the Wear OS node
+  /// network, where a phone can be paired with several watches at once.
+  ///
+  /// Node ids are `node-a`, `node-b`, `node-c`, … in the order given.
+  /// Requires at least two platforms.
+  static List<WearerLinkFake> network(List<WearerFakePlatform> platforms) {
+    if (platforms.length < 2) {
+      throw ArgumentError.value(
+        platforms,
+        'platforms',
+        'a network needs at least two endpoints',
+      );
+    }
+    final wire = _FakeWire();
+    for (var i = 0; i < platforms.length; i++) {
+      wire.hosts.add(_FakeHost(wire, _nodeIdFor(i), platforms[i]));
+    }
+    return wire.hosts.map(WearerLinkFake._).toList();
+  }
+
+  static String _nodeIdFor(int index) => index < 26
+      ? 'node-${String.fromCharCode(97 + index)}'
+      : 'node-$index';
 
   /// This endpoint's node id as seen by the counterpart.
   String get nodeId => _fakeHost.nodeId;
@@ -74,6 +109,36 @@ class WearerLinkFake extends WearerLink {
   /// dropping the link tears down open streams (as the platforms do) and
   /// holds queued transfers until it comes back.
   void setReachable(bool reachable) => _fakeHost.wire.setReachable(reachable);
+
+  /// Node ids of every other endpoint on this network.
+  List<String> get counterpartNodeIds =>
+      _fakeHost.others.map((h) => h.nodeId).toList();
+
+  /// Take one node off the air without touching the rest of the network.
+  ///
+  /// An unreachable node is not a send target at all: it disappears from
+  /// [WearerLink.getCompanionStatus] and `getNodes`, and queued transfers
+  /// for it wait until it returns. To model a node that is *reachable* but
+  /// rejects a send — the case that produces
+  /// [WearerSendReport.failures] — use [failSendsTo].
+  void setNodeReachable(String nodeId, bool reachable) =>
+      _fakeHost.wire.setNodeReachable(nodeId, reachable);
+
+  /// Make interactive sends to [nodeId] fail while leaving it reachable,
+  /// so a fan-out reports partial delivery instead of throwing.
+  ///
+  /// This is the multi-watch race the real Data Layer hits: the capability
+  /// query says the node is there, and the send to it fails anyway.
+  void failSendsTo(
+    String nodeId, {
+    String code = 'sendFailed',
+    String message = 'Simulated send failure.',
+  }) =>
+      _fakeHost.wire.sendFailures[nodeId] = (code: code, message: message);
+
+  /// Undo [failSendsTo] for [nodeId].
+  void clearSendFailure(String nodeId) =>
+      _fakeHost.wire.sendFailures.remove(nodeId);
 
   /// `launchCompanion` calls received by this endpoint, for assertions.
   List<DateTime> get companionLaunches =>
@@ -124,20 +189,42 @@ class WearerLinkFake extends WearerLink {
 
 // ---------------------------------------------------------------------------
 
-/// State shared by the two endpoints.
+/// State shared by every endpoint on the network.
 class _FakeWire {
-  late _FakeHost a;
-  late _FakeHost b;
+  final hosts = <_FakeHost>[];
 
+  /// Master switch: false takes the whole network down.
   bool reachable = true;
 
-  _FakeHost other(_FakeHost self) => identical(self, a) ? b : a;
+  /// Nodes individually off the air while [reachable] is still true.
+  final offlineNodes = <String>{};
+
+  /// Nodes that stay reachable but reject interactive sends.
+  final sendFailures = <String, ({String code, String message})>{};
+
+  List<_FakeHost> others(_FakeHost self) =>
+      hosts.where((h) => !identical(h, self)).toList();
+
+  bool isNodeReachable(String nodeId) =>
+      reachable && !offlineNodes.contains(nodeId);
 
   void setReachable(bool value) {
     if (reachable == value) return;
     reachable = value;
-    for (final host in [a, b]) {
+    for (final host in hosts) {
       if (!value) host.dropStreams('link lost');
+      host.pushConnectionState();
+      if (value) host.flushOutbox();
+    }
+  }
+
+  void setNodeReachable(String nodeId, bool value) {
+    final changed = value
+        ? offlineNodes.remove(nodeId)
+        : offlineNodes.add(nodeId);
+    if (!changed) return;
+    for (final host in hosts) {
+      if (!value) host.dropStreamsTo(nodeId, 'link lost');
       host.pushConnectionState();
       if (value) host.flushOutbox();
     }
@@ -156,12 +243,14 @@ class _FakeHost extends WearerLinkHostApi {
 
   bool deliveryEnabled = true;
   final pendingQueue = <WearerEventDto>[];
-  final outbox = <void Function()>[]; // queued transfers awaiting reachability
+  /// Queued transfers awaiting a specific node's return.
+  final outbox = <({String nodeId, void Function() deliver})>[];
   final syncedByMe = <String, Uint8List>{};
   final companionLaunches = <DateTime>[];
   final complicationPushes = <Uint8List>[];
   WearerBackgroundHandler? backgroundHandler;
   final openStreams = <String, String>{}; // id -> path
+  final streamPeers = <String, String>{}; // id -> counterpart node id
   int _eventSeq = 0;
 
   static const _maxMessageBytes = 56 * 1024;
@@ -172,7 +261,55 @@ class _FakeHost extends WearerLinkHostApi {
 
   bool get alive => link != null;
 
-  _FakeHost get other => wire.other(this);
+  /// Every other endpoint on the network, reachable or not.
+  List<_FakeHost> get others => wire.others(this);
+
+  /// Counterparts currently on the air.
+  List<_FakeHost> get reachableOthers =>
+      others.where((h) => wire.isNodeReachable(h.nodeId)).toList();
+
+  /// The counterpart, for operations that only make sense against one.
+  /// On a two-endpoint pair this is unambiguous.
+  _FakeHost get other => others.first;
+
+  /// Nodes an outbound call addresses: [nodeId] when given, else every
+  /// reachable counterpart. Mirrors DataLayerBridge.targetNodes.
+  List<_FakeHost> _targetHosts(String? nodeId) {
+    if (nodeId != null) {
+      final match = others.where(
+        (h) => h.nodeId == nodeId && wire.isNodeReachable(h.nodeId),
+      );
+      if (match.isEmpty) {
+        throw PlatformException(
+          code: 'unreachable',
+          message: 'Node $nodeId is not reachable/capable.',
+        );
+      }
+      return match.toList();
+    }
+    final reachable = reachableOthers;
+    if (reachable.isEmpty) {
+      throw PlatformException(
+        code: 'unreachable',
+        message: 'Fake link is unreachable.',
+      );
+    }
+    return reachable;
+  }
+
+  /// Exactly one target, as request/response and streams require.
+  /// Mirrors DataLayerBridge.sendRequest, which refuses to guess.
+  _FakeHost _singleTarget(String? nodeId) {
+    final targets = _targetHosts(nodeId);
+    if (targets.length != 1) {
+      throw PlatformException(
+        code: 'sendFailed',
+        message: 'needs exactly one target; ${targets.length} capable nodes '
+            'are reachable — pass nodeId.',
+      );
+    }
+    return targets.single;
+  }
 
   // -- inbound delivery -----------------------------------------------------
 
@@ -243,24 +380,57 @@ class _FakeHost extends WearerLinkHostApi {
     link?.debugFlutterApi.onConnectionStateChanged(_status());
   }
 
-  CompanionStatusDto _status() => CompanionStatusDto(
-        state: wire.reachable
-            ? ConnectionStateDto.reachable
-            : ConnectionStateDto.unreachable,
-        nodes: wire.reachable ? [other.nodeId] : [],
-      );
+  CompanionStatusDto _status() {
+    final reachable = reachableOthers;
+    return CompanionStatusDto(
+      state: reachable.isEmpty
+          ? ConnectionStateDto.unreachable
+          : ConnectionStateDto.reachable,
+      nodes: reachable.map((h) => h.nodeId).toList(),
+    );
+  }
 
   void flushOutbox() {
     final queued = List.of(outbox);
     outbox.clear();
-    for (final deliver in queued) {
-      deliver();
+    for (final entry in queued) {
+      if (wire.isNodeReachable(entry.nodeId)) {
+        entry.deliver();
+      } else {
+        outbox.add(entry); // still away; keep holding it
+      }
+    }
+  }
+
+  /// Deliver to every reachable counterpart now, holding one copy per
+  /// absent node until it comes back — how DataClient items actually sync.
+  void _broadcast(WearerEventDto Function(_FakeHost target) build) {
+    for (final target in others) {
+      if (wire.isNodeReachable(target.nodeId)) {
+        target.receive(build(target));
+      } else {
+        outbox.add((
+          nodeId: target.nodeId,
+          deliver: () => target.receive(build(target)),
+        ));
+      }
+    }
+  }
+
+  /// Tear down only the streams held with [nodeId].
+  void dropStreamsTo(String nodeId, String reason) {
+    for (final entry in List.of(streamPeers.entries)) {
+      if (entry.value != nodeId) continue;
+      streamPeers.remove(entry.key);
+      openStreams.remove(entry.key);
+      link?.debugFlutterApi.onStreamClosed(entry.key, reason);
     }
   }
 
   void dropStreams(String reason) {
     for (final id in List.of(openStreams.keys)) {
       openStreams.remove(id);
+      streamPeers.remove(id);
       link?.debugFlutterApi.onStreamClosed(id, reason);
     }
   }
@@ -288,12 +458,34 @@ class _FakeHost extends WearerLinkHostApi {
     Uint8List payload,
     String? nodeId,
   ) async {
-    _requireReachable();
-    other.receive(_event(WearerEventKindDto.message, path, payload));
-    // The fake models exactly one counterpart, so a send either reaches it
-    // or throws: `failures` is always empty here. Partial delivery only
-    // happens on a real multi-watch Android pairing.
-    return SendReportDto(delivered: [other.nodeId], failures: []);
+    final targets = _targetHosts(nodeId);
+    final delivered = <String>[];
+    final failures = <NodeFailureDto>[];
+    for (final target in targets) {
+      final failure = wire.sendFailures[target.nodeId];
+      if (failure != null) {
+        failures.add(
+          NodeFailureDto(
+            nodeId: target.nodeId,
+            code: failure.code,
+            message: failure.message,
+          ),
+        );
+        continue;
+      }
+      // A fresh event per target: ids must stay unique so receiver-side
+      // dedup behaves as it does on device.
+      target.receive(_event(WearerEventKindDto.message, path, payload));
+      delivered.add(target.nodeId);
+    }
+    if (delivered.isEmpty) {
+      throw PlatformException(
+        code: 'sendFailed',
+        message: 'sendMessage reached no node: '
+            '${failures.map((f) => f.nodeId).join(', ')}',
+      );
+    }
+    return SendReportDto(delivered: delivered, failures: failures);
   }
 
   @override
@@ -302,8 +494,7 @@ class _FakeHost extends WearerLinkHostApi {
     Uint8List payload,
     String? nodeId,
   ) async {
-    _requireReachable();
-    final counterpart = other;
+    final counterpart = _singleTarget(nodeId);
     if (!counterpart.deliveryEnabled) {
       throw PlatformException(
         code: 'sendFailed',
@@ -331,18 +522,17 @@ class _FakeHost extends WearerLinkHostApi {
   @override
   Future<void> syncData(String path, Uint8List payload) async {
     syncedByMe[path] = payload;
-    final dto = _event(WearerEventKindDto.data, path, payload);
-    if (wire.reachable) {
-      other.receive(dto);
-    } else {
-      // Latest-per-path: replace any queued value for the same path.
-      outbox.add(() => other.receive(dto));
-    }
+    _broadcast((_) => _event(WearerEventKindDto.data, path, payload));
   }
 
   @override
-  Future<Uint8List?> readSyncData(String path) async =>
-      other.syncedByMe[path];
+  Future<Uint8List?> readSyncData(String path) async {
+    for (final host in others) {
+      final value = host.syncedByMe[path];
+      if (value != null) return value;
+    }
+    return null;
+  }
 
   @override
   Future<void> deleteSyncData(String path) async => syncedByMe.remove(path);
@@ -376,19 +566,14 @@ class _FakeHost extends WearerLinkHostApi {
   @override
   Future<List<String>> listSyncPaths(String prefix) async => {
         ...syncedByMe.keys,
-        ...other.syncedByMe.keys,
+        for (final host in others) ...host.syncedByMe.keys,
       }.where((p) => p.startsWith(prefix)).toList();
 
   @override
   Future<void> transferData(String path, Uint8List payload) async {
     // Size-unlimited by contract (oversized payloads ride the blob route
     // natively); observable result is identical, so deliver directly.
-    final dto = _event(WearerEventKindDto.data, path, payload);
-    if (wire.reachable) {
-      other.receive(dto);
-    } else {
-      outbox.add(() => other.receive(dto));
-    }
+    _broadcast((_) => _event(WearerEventKindDto.data, path, payload));
   }
 
   @override
@@ -405,26 +590,26 @@ class _FakeHost extends WearerLinkHostApi {
       );
     }
     final bytes = source.readAsBytesSync();
-    void deliver() {
+    // Each target gets its own copy on disk, as each device would.
+    WearerEventDto build(_FakeHost target) {
       final dest = File(
-        '${Directory.systemTemp.path}/wearer_fake_${other.nodeId}_'
+        '${Directory.systemTemp.path}/wearer_fake_${target.nodeId}_'
         '${DateTime.now().microsecondsSinceEpoch}',
       )..writeAsBytesSync(bytes);
-      other.receive(
-        other._event(
-          WearerEventKindDto.file,
-          path,
-          Uint8List(0),
-          filePath: dest.path,
-        ),
+      return target._event(
+        WearerEventKindDto.file,
+        path,
+        Uint8List(0),
+        filePath: dest.path,
       );
     }
 
-    if (wire.reachable) {
-      deliver();
-    } else {
-      outbox.add(deliver);
+    if (nodeId != null) {
+      final target = _targetHosts(nodeId).single;
+      target.receive(build(target));
+      return;
     }
+    _broadcast(build);
   }
 
   @override
@@ -436,31 +621,42 @@ class _FakeHost extends WearerLinkHostApi {
       case WearerFakePlatform.iPhone:
         break; // workout-only launch: background-style, no reachability need
     }
-    other.companionLaunches.add(DateTime.now());
-    if (route != null || argsJson != null) {
-      final payload = Uint8List.fromList(
-        utf8.encode(jsonEncode({'route': route, 'args': argsJson})),
-      );
-      other.receive(_event(WearerEventKindDto.data, '/__wllaunch', payload));
+    // RemoteActivityHelper fans out to every capable node.
+    final targets = platform == WearerFakePlatform.iPhone
+        ? others
+        : _targetHosts(null);
+    for (final target in targets) {
+      target.companionLaunches.add(DateTime.now());
+      if (route != null || argsJson != null) {
+        final payload = Uint8List.fromList(
+          utf8.encode(jsonEncode({'route': route, 'args': argsJson})),
+        );
+        target.receive(
+          _event(WearerEventKindDto.data, '/__wllaunch', payload),
+        );
+      }
     }
   }
 
   @override
-  Future<List<WearerNodeDto>> getNodes() async => [
-        WearerNodeDto(
-          id: other.nodeId,
-          displayName: 'Fake ${other.platform.name}',
-          isNearby: wire.reachable,
+  Future<List<WearerNodeDto>> getNodes() async => others
+      .map(
+        (h) => WearerNodeDto(
+          id: h.nodeId,
+          displayName: 'Fake ${h.platform.name}',
+          isNearby: wire.isNodeReachable(h.nodeId),
         ),
-      ];
+      )
+      .toList();
 
   @override
   Future<CounterpartVitalsDto> getCounterpartVitals(String? nodeId) async {
-    _requireReachable();
+    // Served by a request on the other side, so it needs one clear target.
+    final target = _singleTarget(nodeId);
     return CounterpartVitalsDto(
       batteryPercent: 80,
       isCharging: false,
-      model: 'Fake ${other.platform.name}',
+      model: 'Fake ${target.platform.name}',
       osVersion: 'fake-1.0',
     );
   }
@@ -473,7 +669,9 @@ class _FakeHost extends WearerLinkHostApi {
         message: 'Complication push is watchOS-only.',
       );
     }
-    other.complicationPushes.add(payload);
+    for (final target in others) {
+      target.complicationPushes.add(payload);
+    }
   }
 
   @override
@@ -532,16 +730,18 @@ class _FakeHost extends WearerLinkHostApi {
         message: 'Event delivery is disabled.',
       );
     }
-    final counterpart = other;
+    final counterpart = _singleTarget(nodeId);
     if (!counterpart.alive || !counterpart.deliveryEnabled) {
       throw PlatformException(
         code: 'sendFailed',
         message: 'Counterpart refused the stream.',
       );
     }
-    final id = 'stream-$nodeId-${_eventSeq++}';
+    final id = 'stream-${counterpart.nodeId}-${_eventSeq++}';
     openStreams[id] = path;
+    streamPeers[id] = counterpart.nodeId;
     counterpart.openStreams[id] = path;
+    counterpart.streamPeers[id] = this.nodeId;
     link?.debugFlutterApi.onStreamOpened(id, path, counterpart.nodeId, false);
     counterpart.link?.debugFlutterApi.onStreamOpened(
       id,
@@ -561,15 +761,20 @@ class _FakeHost extends WearerLinkHostApi {
       );
     }
     _requireReachable();
-    other.link?.debugFlutterApi.onStreamData(streamId, data);
+    final peerId = streamPeers[streamId];
+    final peer = others.where((h) => h.nodeId == peerId).firstOrNull;
+    peer?.link?.debugFlutterApi.onStreamData(streamId, data);
   }
 
   @override
   Future<void> closeStream(String streamId) async {
     if (openStreams.remove(streamId) == null) return;
+    final peerId = streamPeers.remove(streamId);
     link?.debugFlutterApi.onStreamClosed(streamId, null);
-    if (other.openStreams.remove(streamId) != null) {
-      other.link?.debugFlutterApi.onStreamClosed(streamId, null);
+    final peer = others.where((h) => h.nodeId == peerId).firstOrNull;
+    if (peer != null && peer.openStreams.remove(streamId) != null) {
+      peer.streamPeers.remove(streamId);
+      peer.link?.debugFlutterApi.onStreamClosed(streamId, null);
     }
   }
 }

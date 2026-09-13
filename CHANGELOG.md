@@ -1,3 +1,24 @@
+## 2.1.0
+
+* **Multi-node fake harness.** `WearerLinkFake.network([...])` builds any
+  number of endpoints on one in-memory network — a phone with several
+  watches, as the Wear OS node network allows — so fan-out and partial
+  delivery are testable without hardware. `WearerLinkFake.pair()` is
+  unchanged and now delegates to it.
+* `failSendsTo(nodeId)` / `clearSendFailure(nodeId)` make one node reject
+  interactive sends while staying reachable: the case that produces
+  `WearerSendReport.failures` rather than a throw.
+* `setNodeReachable(nodeId, reachable)` takes a single node off the air
+  without dropping the whole link. An offline node leaves the target set
+  entirely (absent from status and `getNodes`, never a `failures` entry),
+  and queued transfers held for it deliver when it returns.
+* `counterpartNodeIds` lists an endpoint's counterparts.
+* The fake now mirrors production target resolution throughout: messages,
+  files and companion launches fan out to every reachable node, while
+  `sendRequest`, streams and counterpart vitals refuse to guess between
+  several counterparts and ask for a `nodeId` — matching
+  `DataLayerBridge.targetNodes`/`sendRequest`.
+
 ## 2.0.0
 
 **Breaking:** `sendMessage` (and `sendJson`) now return a `WearerSendReport`
